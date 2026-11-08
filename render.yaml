@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: virtual-regatta-noaa
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/gfs/status
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: NOAA_MIN_INTERVAL_MS
+        value: "10000"

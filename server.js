@@ -1,9 +1,8 @@
 'use strict';
 
-// VIRTUAL REGATTA v13 — serveur local + météo NOAA GFS GRIB2.
-// Installation : npm install @trkbt10/grib2-wasm
-// Lancement    : node server.js
-// Adresse      : http://127.0.0.1:3000
+// VIRTUAL REGATTA PWA — service distant NOAA GFS GRIB2.
+// Node et le décodeur sont installés sur l’hébergeur, jamais sur les appareils clients.
+// Les navigateurs accèdent à l’application par une URL HTTPS.
 
 const http = require('http');
 const https = require('https');
@@ -13,10 +12,10 @@ const crypto = require('crypto');
 const zlib = require('zlib');
 
 const PORT = Number(process.env.PORT || 3000);
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const DIR = __dirname;
 const SAVE = path.join(DIR, 'save.json');
-const DEFAULT_PAGE = 'Virtual_Regatta_v13_NOAA.html';
+const DEFAULT_PAGE = 'index.html';
 const WEATHER_DIR = path.join(DIR, 'noaa_cache');
 const GRIB_DIR = path.join(WEATHER_DIR, 'grib');
 const FORECAST_DIR = path.join(WEATHER_DIR, 'forecast');
@@ -38,6 +37,9 @@ fs.mkdirSync(FORECAST_DIR, { recursive: true });
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.svg': 'image/svg+xml',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -173,6 +175,52 @@ let noaaRequestQueue = Promise.resolve();
 const forecastInflight = new Map();
 const forecastMemory = new Map();
 const localMemory = new Map();
+
+// Les prévisions complètes peuvent nécessiter plusieurs minutes à récupérer.
+// Cette file garde le travail côté serveur et permet à la PWA de suivre son état.
+const gfsJobs = new Map();
+let activeGfsJob = null;
+function startGfsJob(points) {
+  const signature = hash(JSON.stringify(points.map(p => [Number(p.lat.toFixed(4)), Number(p.lng.toFixed(4))])));
+  const existing = [...gfsJobs.values()].find(j => j.signature === signature && (j.state === 'running' || j.state === 'ready'));
+  if (existing) return existing;
+  if (activeGfsJob && activeGfsJob.state === 'running') {
+    throw Object.assign(new Error('Un calcul NOAA est déjà en cours sur le serveur. Attends qu’il se termine avant de lancer une autre course.'), { statusCode: 409 });
+  }
+  const now = Date.now();
+  for (const [id, job] of gfsJobs) {
+    if (now - job.createdAt > 2 * 3600000) gfsJobs.delete(id);
+  }
+  const id = crypto.randomBytes(12).toString('hex');
+  const job = { id, signature, state: 'running', message: 'Préparation du calcul NOAA…', createdAt: now, result: null, error: null };
+  gfsJobs.set(id, job);
+  activeGfsJob = job;
+  Promise.resolve().then(() => buildForecast(points)).then(result => {
+    job.result = result;
+    job.state = 'ready';
+    job.message = wxStatus.message || 'Prévisions NOAA prêtes.';
+    job.completedAt = Date.now();
+  }).catch(error => {
+    job.state = 'failed';
+    job.error = error.message || String(error);
+    job.message = 'Erreur NOAA : ' + job.error;
+    job.completedAt = Date.now();
+  }).finally(() => {
+    if (activeGfsJob === job) activeGfsJob = null;
+  });
+  return job;
+}
+function sendGfsJobResult(res, job) {
+  if (!job || job.state !== 'ready' || !job.result) return sendJson(res, 409, { error: 'Le résultat NOAA n’est pas encore disponible.' });
+  return send(res, 200, job.result.payload, 'application/octet-stream', {
+    'Content-Encoding': 'gzip',
+    'X-VR-GFS-T0': String(job.result.t0),
+    'X-VR-GFS-Cycle': runLabel(job.result.run),
+    'X-VR-GFS-Points': String(job.result.points),
+    'X-VR-GFS-Hours': String(job.result.hours),
+    'X-VR-GFS-Model': job.result.model
+  });
+}
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -755,6 +803,36 @@ const server = http.createServer(async (req, res) => {
       console.error('NOAA GFS local:', error.message);
       return sendJson(res, error.statusCode || 502, { ok: false, error: error.message || 'NOAA GFS indisponible.' });
     }
+  }
+
+  if (requestUrl.pathname === '/api/gfs/start') {
+    if (req.method !== 'POST') return send(res, 405, 'Method Not Allowed');
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      validatePoints(body.points);
+      const job = startGfsJob(body.points);
+      return sendJson(res, 202, { jobId: job.id, state: job.state, message: job.message });
+    } catch (error) {
+      return sendJson(res, error.statusCode || 400, { ok: false, error: error.message || 'Impossible de démarrer le calcul NOAA.' });
+    }
+  }
+
+  const gfsJobMatch = requestUrl.pathname.match(/^\/api\/gfs\/jobs\/([a-f0-9]{24})(?:\/(result))?$/);
+  if (gfsJobMatch) {
+    const job = gfsJobs.get(gfsJobMatch[1]);
+    if (!job) return sendJson(res, 404, { error: 'Calcul NOAA introuvable ou expiré.' });
+    if (gfsJobMatch[2] === 'result') {
+      if (req.method !== 'GET') return send(res, 405, 'Method Not Allowed');
+      return sendGfsJobResult(res, job);
+    }
+    if (req.method !== 'GET') return send(res, 405, 'Method Not Allowed');
+    return sendJson(res, 200, {
+      jobId: job.id, state: job.state,
+      done: wxStatus.done, total: wxStatus.total,
+      message: job.state === 'running' ? wxStatus.message : job.message,
+      cycle: wxStatus.cycle, error: job.error,
+      createdAt: job.createdAt, completedAt: job.completedAt || null
+    });
   }
 
   if (requestUrl.pathname === '/api/gfs') {
