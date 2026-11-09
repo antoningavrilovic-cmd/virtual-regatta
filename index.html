@@ -370,7 +370,7 @@
     $('view-'+name).classList.add('active');
     document.querySelectorAll('.side-btn[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===name));
     if(name==='settings'&&typeof updateSetInfo==='function')updateSetInfo();
-    if(name==='race')setTimeout(()=>{if(state.map){state.map.invalidateSize();positionWeatherCanvas();drawWeatherOverlay(0);}},140);
+    if(name==='race')setTimeout(()=>{if(state.map){state.map.invalidateSize();positionWeatherCanvas();drawWeatherOverlay(0);scheduleWeatherGridRefresh();}},140);
   };
   const setView = name => {
     if(!name||!$('view-'+name)||state.view===name)return;
@@ -498,6 +498,7 @@
     state.weatherCanvas=$('weatherCanvas');weatherPane.appendChild(state.weatherCanvas);state.weatherCanvas.style.inset='auto';state.weatherCanvas.style.right='auto';state.weatherCanvas.style.bottom='auto';state.weatherCtx=state.weatherCanvas.getContext('2d');positionWeatherCanvas();resizeWeatherCanvas();
     state.map.on('moveend zoomend',()=>{positionWeatherCanvas();state.weatherFieldDirty=true;drawWeatherOverlay(0);scheduleWeatherGridRefresh();});
     state.map.on('move zoom',()=>{positionWeatherCanvas();state.weatherFieldDirty=true;drawWeatherOverlay(0);});
+    state.map.on('resize',()=>{resizeWeatherCanvas();positionWeatherCanvas();drawWeatherOverlay(0);scheduleWeatherGridRefresh();});
     $('mapNotice').innerHTML='<strong>CARTE SATELLITE</strong><br>Flux de vent météo animés · portes virtuelles près des villes.';
     setTimeout(()=>refreshWeatherGrid(true),900);initPointerTip();
   }
@@ -1029,17 +1030,6 @@
     lorient:[[47.52,-3.62]]                                                           // ouest de Groix → Quiberon
   };
   const firstTarget=()=>{const l=RACE_WAYPOINTS[state.race];return l&&l.length?{lat:l[0][0],lng:l[0][1]}:state.finish;};
-  function botTarget(bot){
-    const l=RACE_WAYPOINTS[state.race]||[];
-    while(bot.wp<l.length){const p={lat:l[bot.wp][0],lng:l[bot.wp][1]};if(distanceNm(bot.position,p)>7)return p;bot.wp++;}
-    return state.finish;
-  }
-  function botAheadClear(bot,nm){for(let d=1.2;d<=nm+1e-6;d+=1.2){if(botPointBlocked(destination(bot.position,bot.heading,d)))return false;}return true;}
-  function botEscapeHeading(bot){   // aucun cap « idéal » libre : on prend celui qui offre le plus d'eau devant
-    let best=null,bestD=0.6;
-    for(let h=0;h<360;h+=10){let d=0;while(d<6&&!botPointBlocked(destination(bot.position,h,d+0.3)))d+=0.3;if(d>bestD){bestD=d;best=h;}}
-    return best;
-  }
   function initBots(){
     clearBotMarkers();state.bots=[];
     if(!state.landReady||!window.L)return;
@@ -1066,53 +1056,74 @@
       else{bot.marker.setLatLng([bot.position.lat,bot.position.lng]);bot.marker.setIcon(botMarkerIcon(bot));}
     });
   }
-  function botPointBlocked(point){
-    // Le masque côtier accélère énormément les contrôles. Le polygone exact
-    // reste utilisé pour les cellules qui touchent réellement le rivage.
-    return inZone(point)||(RT.coast?fastLand(point):isLand(point));
+  function botPointBlocked(point){return inZone(point)||isLand(point);}
+  // ===== IA v2 : waypoints + VMG avec hystérésis (pas d'aller-retour) + évitement côtier =====
+  // Proximité de côte via le masque 0,25° : en plein océan, aucun test de polygone (rapide).
+  function nearCoast(p,r){
+    const k=RT.coast;if(!k)return true;
+    const x=k.cx(p.lng),y=k.cy(p.lat);r=r||3;
+    for(let j=-r;j<=r;j++)for(let i=-r;i<=r;i++){const xx=x+i,yy=y+j;if(xx>=0&&xx<k.W&&yy>=0&&k.m[yy*k.W+xx]===3)return true;}
+    return false;
   }
-  function botCourseIsClear(bot,cog,lookAheadNm){
-    const steps=Math.max(3,Math.ceil(lookAheadNm/.4));
-    for(let i=1;i<=steps;i++){
-      const p=destination(bot.position,cog,lookAheadNm*i/steps);
-      if(botPointBlocked(p))return false;
-    }
-    return true;
+  function freeDistance(p,h,maxNm,step){   // milles d'eau libre devant un cap
+    step=step||1;
+    for(let d=step;d<=maxNm+1e-6;d+=step)if(botPointBlocked(destination(p,h,d)))return d-step;
+    return maxNm;
   }
-  function botHeadingChoice(bot,w){
-    const target=bearing(bot.position,botTarget(bot)),candidates=[];
-    // 36 caps suffisent pour le choix initial. Les vérifications côtières,
-    // plus coûteuses, ne sont faites que pour les meilleurs candidats.
-    for(let h=0;h<360;h+=10){
-      const twa=Math.abs(signedTwa(h,w.dir));
-      const j=polarSpeed('jib',twa,w.speed),sp=polarSpeed('spi',twa,w.speed);
-      const sail=sp>j*1.04?'spi':'jib',boatSpeed=Math.max(j,sp)*bot.performance;
-      const hr=h*RAD,bx=Math.sin(hr)*boatSpeed+(state.useCurrent?(w.cu||0):0);
-      const by=Math.cos(hr)*boatSpeed+(state.useCurrent?(w.cv||0):0);
-      const ground=Math.hypot(bx,by),cog=(Math.atan2(bx,by)/RAD+360)%360;
-      if(ground<.15)continue;
-      let score=ground*Math.cos(angleDiff(cog,target)*RAD);
-      const turn=Math.abs(((h-bot.heading+540)%360)-180);
-      score-=turn*(1-bot.skill)*.035;
-      candidates.push({h,sail,boatSpeed,cog,score});
+  const flatXY=(a,b)=>({x:(b.lng-a.lng)*60*Math.cos(a.lat*RAD),y:(b.lat-a.lat)*60});
+  function botTarget(bot){   // prochain waypoint (rayon 7 nm, ou dépassé), puis l'arrivée
+    const l=RACE_WAYPOINTS[state.race]||[];
+    if(!bot.legStart)bot.legStart={...state.start};
+    while(bot.wp<l.length){
+      const t={lat:l[bot.wp][0],lng:l[bot.wp][1]},d=distanceNm(bot.position,t);
+      let passed=false;
+      if(d<30){const a=flatXY(bot.legStart,t),p=flatXY(bot.legStart,bot.position);passed=p.x*a.x+p.y*a.y>=a.x*a.x+a.y*a.y;}
+      if(d>7&&!passed)return t;
+      bot.legStart=t;bot.wp++;
     }
-    candidates.sort((a,b)=>b.score-a.score);
-    const horizons=[Math.max(2.2,Math.min(4.5,(bot.speed||10)*.24)),1.35];
-    for(const lookAhead of horizons){
-      for(const candidate of candidates.slice(0,9)){
-        if(!botCourseIsClear(bot,candidate.cog,lookAhead))continue;
-        // Les candidats sont déjà classés par progression et confort de barre.
-        // On évite ici un second accès météo pour chaque décision d'IA.
-        bot.sail=candidate.sail;return candidate.h;
-      }
+    return state.finish;
+  }
+  function botCrossTrack(bot,t){   // écart à la route (nm), + = à droite
+    const a=flatXY(bot.legStart,t),p=flatXY(bot.legStart,bot.position),L=Math.hypot(a.x,a.y);
+    return L<1?0:(a.y*p.x-a.x*p.y)/L;
+  }
+  function botDecide(bot,w,near){
+    const t=botTarget(bot),tb=bearing(bot.position,t),LB=bearing(bot.legStart,t),dist=distanceNm(bot.position,t);
+    const xt=botCrossTrack(bot,t);bot.corr=bot.corr||.07+(bot.id%7)/7*.12;   // largeur de couloir propre à chaque IA
+    const over=Math.min(2,Math.max(0,Math.abs(xt)/Math.max(6,dist*bot.corr)-1));
+    const c=[];
+    for(let h=0;h<360;h+=5){
+      const twaS=signedTwa(h,w.dir),twa=Math.abs(twaS),j=polarSpeed('jib',twa,w.speed),sp=polarSpeed('spi',twa,w.speed),bs=Math.max(j,sp)*bot.performance;
+      const hr=h*RAD,bx=Math.sin(hr)*bs+(state.useCurrent?(w.cu||0):0),by=Math.cos(hr)*bs+(state.useCurrent?(w.cv||0):0),g=Math.hypot(bx,by);
+      if(g<.2)continue;
+      const cog=(Math.atan2(bx,by)/RAD+360)%360,tk=twaS>=0?1:-1;
+      let sc=g*Math.cos(angleDiff(cog,tb)*RAD);                                   // VMG vers la cible
+      if(over>0)sc-=Math.sign(xt)*g*Math.sin((cog-LB)*RAD)*over*.9;               // hors couloir : on revient vers la route
+      if(bot.tack&&tk!==bot.tack)sc-=Math.max(1.5,bs*.15);                        // coût d'un virement/empannage = hystérésis
+      sc-=angleDiff(h,bot.heading)*.004;
+      c.push({h,sc,cog,tk,sail:sp>j*1.04?'spi':'jib'});
     }
-    return null;
+    c.sort((a,b)=>b.sc-a.sc);
+    const safe=Math.max(3.5,(bot.speed||8)*.3),escape=(bot.blocked||0)>=3;
+    let pick=null;
+    if(!escape){
+      if(!near)pick=c[0];
+      else for(const k of c.slice(0,16))if(freeDistance(bot.position,k.cog,safe)>=safe-.01){pick=k;break;}
+    }
+    let hold=near?600:bot.decisionInterval*.5;
+    if(!pick&&c.length){   // aucun cap libre : on prend le cap offrant le plus d'eau, et on s'y tient 20 min
+      let bd=.9;for(const k of c)if(k.h%10===0){const d=freeDistance(bot.position,k.cog,6);if(d>bd){bd=d;pick=k;}}
+      hold=1200;if(pick)bot.blocked=0;
+    }
+    if(!pick){bot.speed=0;bot.grounded=true;bot.nextDecisionAt=state.simTime+900;return;}
+    const prevH=bot.heading;bot.grounded=false;bot.heading=pick.h;bot.sail=pick.sail;
+    if(bot.tack&&pick.tk!==bot.tack)bot.speed*=.72;
+    bot.tack=pick.tk;bot.nextDecisionAt=state.simTime+hold;
+    if(bot.marker&&angleDiff(prevH,bot.heading)>.4)bot.marker.setIcon(botMarkerIcon(bot));
   }
   let botsLastUpdateAt=0,botsAccumulatedDt=0;
   function updateBots(gameDt){
     if(!state.bots.length||gameDt<=0)return;
-    // Les IA évoluent à 16 Hz indépendamment du rafraîchissement de la carte.
-    // Le temps simulé est accumulé pour ne pas ralentir la course.
     botsAccumulatedDt+=gameDt;
     const pinNow=performance.now();
     if(botsLastUpdateAt&&pinNow-botsLastUpdateAt<60)return;
@@ -1125,23 +1136,13 @@
       if(!w&&bot.lastWind&&state.windReady)w=bot.lastWind;
       if(!w)continue; // aucune météo inventée
       bot.lastWind={speed:w.speed,dir:w.dir,cu:w.cu||0,cv:w.cv||0};
-      if(!bot.grounded&&state.simTime>=bot.nextCoastCheck){   // regard devant toutes les 10 min de jeu : côte proche = nouvelle décision
-        bot.nextCoastCheck=state.simTime+600;
-        if(bot.speed>1&&!botAheadClear(bot,Math.max(3,bot.speed*.4)))bot.nextDecisionAt=state.simTime;
+      const near=nearCoast(bot.position,3);
+      if(!bot.grounded&&near&&bot.speed>1&&state.simTime>=(bot.nextCoastCheck||0)){   // côte devant ? nouvelle décision
+        bot.nextCoastCheck=state.simTime+300;
+        const look=Math.max(3.5,bot.speed*.3);
+        if(freeDistance(bot.position,bot.heading,look)<look-.01)bot.nextDecisionAt=state.simTime;
       }
-      if(state.simTime>=bot.nextDecisionAt){
-        const previousHeading=bot.heading,previous=signedTwa(bot.heading,w.dir);
-        let choice=botHeadingChoice(bot,w);if(!Number.isFinite(choice))choice=botEscapeHeading(bot);
-        if(Number.isFinite(choice)){
-          bot.heading=choice;bot.grounded=false;
-          const next=signedTwa(bot.heading,w.dir);
-          if(previous*next<0)bot.speed*=.72;
-          if(bot.marker&&Math.abs(angleDiff(previousHeading,bot.heading))>.4)bot.marker.setIcon(botMarkerIcon(bot));
-          bot.nextDecisionAt=state.simTime+bot.decisionInterval;
-        }else{
-          bot.speed=0;bot.grounded=true;bot.nextDecisionAt=state.simTime+900;
-        }
-      }
+      if(state.simTime>=bot.nextDecisionAt)botDecide(bot,w,near);
       if(bot.grounded){
         bot.speed=0;
         if(refreshPins&&bot.marker)bot.marker.setLatLng([bot.position.lat,bot.position.lng]);
@@ -1157,19 +1158,12 @@
       const ground=Math.hypot(bx,by),cog=(Math.atan2(bx,by)/RAD+360)%360,nm=ground*gameDt/3600;
       if(nm>0){
         let next=bot.position,blocked=false;
-        const steps=Math.max(1,Math.ceil(nm/.2));
-        for(let k=1;k<=steps;k++){
-          const p=destination(bot.position,cog,nm*k/steps);
-          if(botPointBlocked(p)){blocked=true;break;}
-          next=p;
-        }
-        if(blocked){
-          bot.speed*=.5;
-          // Réévalue le cap dès la prochaine image, au lieu de réessayer le même cap.
-          bot.nextDecisionAt=state.simTime;
-        }else bot.position=next;
+        const steps=near?Math.max(1,Math.ceil(nm/.2)):1;
+        for(let k=1;k<=steps;k++){const p=destination(bot.position,cog,nm*k/steps);if(near&&botPointBlocked(p)){blocked=true;break;}next=p;}
+        if(blocked){bot.speed*=.5;bot.blocked=(bot.blocked||0)+1;bot.nextDecisionAt=state.simTime;}
+        else{bot.position=next;bot.blocked=0;}
       }
-      if(!bot.grounded&&!bot.finished){const crossing=finishGateCrossing(previousBotPosition,bot.position);if(crossing){bot.position=crossing;bot.finished=true;bot.finishTime=state.simTime;bot.speed=0;}}
+      if(!bot.finished){const crossing=finishGateCrossing(previousBotPosition,bot.position);if(crossing){bot.position=crossing;bot.finished=true;bot.finishTime=state.simTime;bot.speed=0;}}
       if(refreshPins&&bot.marker)bot.marker.setLatLng([bot.position.lat,bot.position.lng]);
     }
     if(performance.now()-state.botBoardAt>3000){state.botBoardAt=performance.now();updateStandings();}
@@ -1240,46 +1234,49 @@
     for(let i=0,n=Math.ceil(ms/(dts*1000));i<n;i++){const prev=s.p;if(!simStep(s,dts,fcO)){blocked=true;break;}nm+=distanceNm(prev,s.p);if(i%6===0)state.track.push({...s.p});}
     state.position=s.p;state.heading=s.hd;state.sail=s.sail;state.speed=s.v;return {nm,hours:ms/3.6e6,blocked};
   }
-  function gridFromLocalWind(){
-    // Avant le chargement complet du couloir, on affiche déjà la vraie mini-grille
-    // NOAA 3×3 du serveur autour du bateau. Elle est remplacée par la grille GFS
-    // de course dès que celle-ci est disponible.
-    if(!state.map||!LW.pts||LW.pts.length!==9)return false;
-    state.weatherGrid=LW.pts.map((p,i)=>({lat:p.lat,lng:p.lng,row:Math.floor(i/3),col:i%3,speed:p.s,dir:p.d}));
-    state.weatherGridRows=3;state.weatherGridCols=3;state.screenWeatherGrid=null;state.weatherFieldDirty=true;
-    const grid=buildScreenWeatherGrid();
-    if(!grid||!grid.validCells.length)return false;
-    $('weatherGridStatus').textContent='NOAA GFS · grille locale 0,25°';
-    $('weatherLayerCaption').textContent='NOAA GFS · vent local autour du bateau';
-    drawWeatherOverlay(0);return true;
-  }
-  function gridFromForecast(){
-    // Affiche directement les nœuds NOAA réellement décodés. On évite ainsi
-    // les échantillons écran hors du couloir qui pouvaient annuler tout le champ.
-    const fc=RT.fine||RT.coarse;
-    if(!state.map||!fc||!fc.w||!fc.map||!fc.lats||!fc.lngs)return false;
-    const tg=weatherDisplayTimeMs(),nt=fc.w.NT,th=clamp((tg-fc.t0)/3600000,0,nt-1.001),it=Math.floor(th),tt=th-it;
-    const pts=[];let validPoints=0;
-    for(let row=0;row<fc.lats.length;row++)for(let col=0;col<fc.nx;col++){
-      const pointIndex=fc.map[row*fc.nx+col];
-      // Conserve TOUS les nœuds pour garder les coordonnées écran monotones.
-      // Seules les cellules ayant quatre valeurs valides alimenteront le vent.
-      if(pointIndex<0){pts.push({lat:fc.lats[row],lng:fc.lngs[col],row,col,speed:null,dir:null});continue;}
-      const k=pointIndex*nt+it,u0=fc.w.u[k],u1=fc.w.u[k+1],v0=fc.w.v[k],v1=fc.w.v[k+1];
-      const u=u0+(u1-u0)*tt,v=v0+(v1-v0)*tt;
-      if(!Number.isFinite(u)||!Number.isFinite(v)){pts.push({lat:fc.lats[row],lng:fc.lngs[col],row,col,speed:null,dir:null});continue;}
-      const speed=Math.hypot(u,v),dir=(Math.atan2(-u,-v)/RAD+360)%360;
-      const ok=Number.isFinite(speed)&&Number.isFinite(dir);
-      if(ok)validPoints++;
-      pts.push({lat:fc.lats[row],lng:fc.lngs[col],row,col,speed:ok?speed:null,dir:ok?dir:null});
+  // ===== Aperçu météo v2 : champ de vent GFS (1 fichier NOAA) pour la zone visible, indépendant du calcul 16 jours =====
+  const WF={cache:new Map(),busy:false,again:false,timer:null,failUntil:0};
+  function gridFromLocalWind(){return false;}
+  function gridFromForecast(){clearTimeout(WF.timer);WF.timer=setTimeout(loadWindField,250);return true;}
+  async function loadWindField(){
+    if(!state.map)return false;
+    if(WF.busy){WF.again=true;return false;}
+    const b=state.map.getBounds(),c=state.map.getCenter();
+    let s=Math.max(-80,b.getSouth()),n=Math.min(80,b.getNorth()),w=Math.max(-180,b.getWest()),e=Math.min(180,b.getEast());
+    if(e-w>80){w=c.lng-40;e=c.lng+40;}if(n-s>60){s=c.lat-30;n=c.lat+30;}
+    const T=10,S=Math.max(-80,Math.floor((s-2)/T)*T),N=Math.min(80,Math.ceil((n+2)/T)*T),Wd=Math.max(-180,Math.floor((w-2)/T)*T),E=Math.min(180,Math.ceil((e+2)/T)*T);
+    const H3=3*3600000,time=Math.round(weatherDisplayTimeMs()/H3)*H3,key=[S,N,Wd,E,time].join('|');
+    let f=WF.cache.get(key);
+    if(!f){
+      if(Date.now()<WF.failUntil)return false;
+      WF.busy=true;$('weatherGridStatus').textContent='NOAA GFS · chargement du champ de vent…';
+      try{
+        const r=await fetch(API_BASE+'/api/gfs/field?'+new URLSearchParams({south:S,north:N,west:Wd,east:E,time}),{cache:'no-store'});
+        let d;try{d=await r.json();}catch(_){throw new Error('réponse illisible (HTTP '+r.status+')');}
+        if(!r.ok||!d.u)throw new Error(d.error||('HTTP '+r.status));
+        f=d;WF.cache.set(key,f);if(WF.cache.size>16)WF.cache.delete(WF.cache.keys().next().value);
+      }catch(err){
+        WF.failUntil=Date.now()+15000;
+        $('weatherGridStatus').textContent='Vent NOAA indisponible';
+        $('mapNotice').innerHTML='<strong>CHAMP DE VENT INDISPONIBLE</strong><br>'+err.message;console.warn('Champ de vent NOAA :',err);
+        return false;
+      }finally{WF.busy=false;if(WF.again){WF.again=false;setTimeout(loadWindField,50);}}
     }
-    if(!validPoints)return gridFromLocalWind();
-    state.weatherGrid=pts;state.weatherGridRows=fc.lats.length;state.weatherGridCols=fc.nx;
-    state.lastGridFetch=Date.now();state.screenWeatherGrid=null;state.weatherFieldDirty=true;
-    const grid=buildScreenWeatherGrid();
-    if(!grid||!grid.validCells.length)return gridFromLocalWind();
-    $('weatherGridStatus').textContent='NOAA GFS · '+fc.step+'° · '+grid.validCells.length+' cellules';
-    $('weatherLayerCaption').textContent='NOAA GFS · prévision '+fmtT(tg)+' UTC';
+    return applyWindField(f);
+  }
+  function applyWindField(f){
+    const pts=[];
+    for(let j=0;j<f.nj;j++)for(let i=0;i<f.ni;i++){
+      const k=j*f.ni+i,u=f.u[k],v=f.v[k],ok=Number.isFinite(u)&&Number.isFinite(v);
+      pts.push({lat:f.lat0+j*f.d,lng:f.lng0+i*f.d,row:j,col:i,speed:ok?Math.hypot(u,v):null,dir:ok?(Math.atan2(-u,-v)/RAD+360)%360:null});
+    }
+    state.weatherGrid=pts;state.weatherGridRows=f.nj;state.weatherGridCols=f.ni;state.lastGridFetch=Date.now();
+    state.screenWeatherGrid=null;state.weatherFieldDirty=true;
+    const g=buildScreenWeatherGrid();
+    if(!g||!g.validCells.length){$('weatherGridStatus').textContent='NOAA GFS · champ vide';return false;}
+    $('weatherGridStatus').textContent='NOAA GFS · '+f.cycle+' · +'+f.forecastHour+' h';
+    $('weatherLayerCaption').textContent='NOAA GFS · valable '+fmtT(f.validTime)+' UTC';
+    $('mapNotice').innerHTML='<strong>CARTE SATELLITE</strong><br>Champ de vent NOAA GFS actif.';
     drawWeatherOverlay(0);return true;
   }
   const rtPanel=document.createElement('div');
@@ -1392,28 +1389,7 @@
   }
   async function fetchMulti(url){return omGet(url);}
   function omRefreshInfo(){const el=$('setWxQuota');if(!el)return;if(!$('setCur').checked){el.textContent='Vent : NOAA GFS direct, sans quota quotidien d’API météo. Open-Meteo n’est pas appelé tant que les courants marins facultatifs restent désactivés.';return;}el.textContent='Open-Meteo est utilisé uniquement pour les courants marins facultatifs. Quota estimé sur ce navigateur : '+Math.round(omUsed(6e4))+' / 600 par minute · '+Math.round(omUsed(36e5))+' / 5 000 par heure · '+Math.round(omUsed(864e5))+' / 10 000 par jour. Dernier appel : '+OMQ.last+(Date.now()<OMQ.blockedUntil?' · bloqué jusqu’à '+omHHMM(OMQ.blockedUntil):'')+'.';}
-  async function refreshWeatherGrid(force=false){
-    if(!state.map||state.gridFetchPending)return;
-    if(Date.now()<(state.gridFailUntil||0))return;
-    if(!force&&Date.now()-state.lastGridFetch<20*60*1000)return;
-    state.gridFetchPending=true;
-    try{
-      if(gridFromForecast())return;
-      if(RT.loadingFc)return; // un routage NOAA est déjà en train de remplir la grille
-      if(!RT.coarse&&!RT.coarsePromise&&state.landReady){
-        $('weatherGridStatus').textContent='NOAA GFS · chargement du modèle';
-        await ensureCoarse(false);
-        if(gridFromForecast())return;
-      }
-      if(LW.pts&&gridFromLocalWind())return;
-      $('weatherGridStatus').textContent='NOAA GFS · données météo en préparation';
-      $('mapNotice').innerHTML='<strong>CHARGEMENT NOAA GFS</strong><br>Le champ de vent apparaîtra dès que les données du modèle auront été décodées.';
-    }catch(err){
-      $('weatherGridStatus').textContent='Vent NOAA indisponible';
-      $('mapNotice').innerHTML='<strong>CHAMP DE VENT INDISPONIBLE</strong><br>'+err.message;
-      console.warn('Weather grid NOAA:',err);
-    }finally{state.gridFetchPending=false;}
-  }
+  async function refreshWeatherGrid(force=false){if(state.map)await loadWindField();}
   function buildScreenWeatherGrid(){
     if(!state.map||!state.weatherGrid.length)return null;
     const rows=state.weatherGridRows,cols=state.weatherGridCols;
@@ -1475,7 +1451,7 @@
     if(!state.map||!state.weatherCtx||!state.weatherCanvas)return;
     if(dt>0){const now=performance.now();if(now-weatherLastDrawAt<50)return;dt=Math.min(.12,weatherLastDrawAt?(now-weatherLastDrawAt)/1000:dt);weatherLastDrawAt=now;}
     const ctx=state.weatherCtx,size=state.map.getSize();
-    if(state.weatherCanvas.width===0||state.weatherCanvas.height===0)resizeWeatherCanvas();
+    if(state.weatherCanvas.style.width!==size.x+'px'||state.weatherCanvas.style.height!==size.y+'px'){resizeWeatherCanvas();positionWeatherCanvas();}   // la carte est créée alors que la vue est encore cachée (taille 0)
     ctx.clearRect(0,0,size.x,size.y);if(state.weatherLayer==='off')return;
     const grid=state.weatherFieldDirty||!state.screenWeatherGrid?buildScreenWeatherGrid():state.screenWeatherGrid;
     if(!grid||!grid.validCells||!grid.validCells.length)return;

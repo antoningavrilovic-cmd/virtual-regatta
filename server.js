@@ -498,17 +498,38 @@ function gribStorageIndex(grid, column, row) {
   return row * grid.ni + column;
 }
 
+function nearestNode(field, point) {
+  const decoder = decoderModule;
+  if (!decoder || !field.grid) return null;
+  // Selon la version du décodeur, la longitude attendue est 0–360 ou -180–180 : on essaie les deux.
+  const lons = [point.lng, point.lng < 0 ? point.lng + 360 : point.lng - 360];
+  for (const lon of lons) {
+    try {
+      const n = decoder.nearestGridpoint(field.grid, point.lat, lon);
+      if (n && Number.isInteger(n.index) && n.index >= 0 && n.index < field.values.length &&
+          Number.isFinite(n.distanceKm) && n.distanceKm <= 35) {
+        const value = Number(field.values[n.index]);
+        if (Number.isFinite(value) && Math.abs(value) < 9000) return value;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+// Interpolation bilinéaire contrôlée par le point de grille le plus proche : chaque méthode vérifie l'autre.
 function sampleField(field, point) {
+  const near = nearestNode(field, point);
+  let bil = null;
+  try { bil = sampleBilinear(field, point); } catch (_) {}
+  if (Number.isFinite(bil) && Math.abs(bil) < 100 && (near === null || Math.abs(bil - near) <= 12)) return bil;
+  return near !== null && Math.abs(near) < 100 ? near : null;
+}
+
+function sampleBilinear(field, point) {
   const decoder = decoderModule;
   const grid = field.grid;
   if (!decoder || !grid || grid.kind !== 'latlon') return null;
 
-  // Garde-fou géographique : le point doit être proche de la grille NOAA.
-  const nearest = decoder.nearestGridpoint(grid, point.lat, point.lng);
-  if (!nearest || !Number.isInteger(nearest.index) || nearest.index < 0 ||
-      nearest.index >= field.values.length || !Number.isFinite(nearest.distanceKm) || nearest.distanceKm > 35) {
-    return null;
-  }
 
   // Coordonnées fractionnaires dans la grille régulière GFS 0,25°.
   const iSign = grid.iScansNegatively ? -1 : 1;
@@ -774,6 +795,53 @@ async function buildLocalWind(lat, lng, targetTime = Date.now()) {
   return value;
 }
 
+const fieldMemory = new Map();
+// Champ de vent d'UN seul fichier GFS sur une zone : sert à l'aperçu météo de la carte.
+async function buildField(south, north, west, east, targetTime) {
+  const bbox = makeBbox([{ lat: south, lng: west }, { lat: north, lng: east }]);
+  let selected = null;
+  let lastError = null;
+  for (const run of runCandidates()) {
+    const age = Math.max(0, (targetTime - run.stamp) / HOUR_MS);
+    const lead = Math.max(0, Math.min(384, Math.round(age / 3) * 3));
+    try { selected = { run, lead, grib: await getGrib(run, lead, bbox) }; break; }
+    catch (error) { lastError = error; if (!error.noaaUnavailable) throw error; }
+  }
+  if (!selected) throw new Error('Aucun champ de vent NOAA disponible. ' + (lastError ? lastError.message : ''));
+  const { run, lead } = selected;
+  const memKey = `${run.date}${run.cycle}_f${lead}_${bbox.key}`;
+  const hit = fieldMemory.get(memKey);
+  if (hit) return hit;
+
+  const pair = await decodeWindPair(selected.grib);
+  const d = 0.25 * Math.max(1, Math.ceil(((bbox.east - bbox.west) / 0.25) / 80));
+  const lat0 = Math.ceil(bbox.south / d) * d;
+  const lng0 = Math.ceil(bbox.west / d) * d;
+  const nj = Math.floor((bbox.north - lat0) / d + 1e-6) + 1;
+  const ni = Math.floor((bbox.east - lng0) / d + 1e-6) + 1;
+  const u = [], v = [];
+  let ok = 0;
+  for (let j = 0; j < nj; j++) {
+    for (let i = 0; i < ni; i++) {
+      const p = { lat: lat0 + j * d, lng: lng0 + i * d };
+      const a = sampleField(pair.u, p), b = sampleField(pair.v, p);
+      if (Number.isFinite(a) && Number.isFinite(b)) {
+        u.push(+(a * MPS_TO_KNOTS).toFixed(1)); v.push(+(b * MPS_TO_KNOTS).toFixed(1)); ok++;
+      } else { u.push(null); v.push(null); }
+    }
+  }
+  if (!ok) {
+    const g = pair.u.grid || {};
+    throw new Error('Champ NOAA décodé mais illisible : ' + JSON.stringify({ kind: g.kind, ni: g.ni, nj: g.nj,
+      lon0: g.longitudeOfFirstGridPoint, lat0: g.latitudeOfFirstGridPoint, di: g.iDirectionIncrement, dj: g.jDirectionIncrement }));
+  }
+  const value = { ok: true, provider: 'NOAA GFS', cycle: runLabel(run), forecastHour: lead,
+    validTime: run.stamp + lead * HOUR_MS, lat0, lng0, d, ni, nj, u, v };
+  fieldMemory.set(memKey, value);
+  if (fieldMemory.size > 40) fieldMemory.delete(fieldMemory.keys().next().value);
+  return value;
+}
+
 function purgeOldGribCache() {
   const cutoff = Date.now() - 3 * 86400000;
   for (const folder of [GRIB_DIR, FORECAST_DIR]) {
@@ -857,6 +925,23 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+
+  if (requestUrl.pathname === '/api/gfs/field') {
+    if (req.method !== 'GET') return send(res, 405, 'Method Not Allowed');
+    const num = name => { const raw = requestUrl.searchParams.get(name); return raw === null || raw === '' ? NaN : Number(raw); };
+    const south = num('south'), north = num('north'), west = num('west'), east = num('east'), time = num('time');
+    if (![south, north, west, east].every(Number.isFinite) || south >= north || west >= east ||
+        south < -85 || north > 85 || west < -180 || east > 180 || east - west > 100 || north - south > 80) {
+      return sendJson(res, 400, { ok: false, error: 'Zone météo invalide.' });
+    }
+    try {
+      const field = await buildField(south, north, west, east, Number.isFinite(time) && time > 0 ? time : Date.now());
+      return sendJson(res, 200, field, { 'Cache-Control': 'public, max-age=300' });
+    } catch (error) {
+      console.error('NOAA GFS field:', error.message);
+      return sendJson(res, error.statusCode || 502, { ok: false, error: error.message || 'Champ de vent NOAA indisponible.' });
+    }
+  }
 
   if (requestUrl.pathname === '/api/gfs/start') {
     if (req.method !== 'POST') return send(res, 405, 'Method Not Allowed');
