@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#07131d" />
-  <title>Virtual Regatta v12 — Le large commence ici</title>
+  <title>Virtual Regatta v13.1 — Le large commence ici</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -119,8 +119,10 @@
     .ranking-row .level{display:block;color:var(--muted);font-size:8px;font-weight:400;margin-top:2px}
     .ranking-row .distance{font:700 9px Manrope;color:#b8cbd4;white-space:nowrap}
     .ranking-row.finished .distance{color:#72e0b4}
-    .finish-banner{display:none;position:absolute;z-index:38;right:22px;bottom:158px;max-width:min(340px,calc(100% - 44px));padding:12px 15px;border:1px solid rgba(231,199,138,.48);border-radius:13px;background:rgba(4,17,27,.94);box-shadow:var(--shadow);backdrop-filter:blur(14px)}
-    .finish-banner.show{display:block}.finish-banner strong{display:block;font:800 13px Manrope;color:var(--gold);margin-bottom:4px}.finish-banner span{font-size:10px;color:#c9d8df;line-height:1.5}
+    .finish-banner{display:none;position:absolute;z-index:38;right:22px;bottom:158px;max-width:min(340px,calc(100% - 44px));padding:12px 15px;border:1px solid rgba(255,140,50,.48);border-radius:13px;background:rgba(4,17,27,.94);box-shadow:var(--shadow);backdrop-filter:blur(14px)}
+    .finish-banner.show{display:block}.finish-banner strong{display:block;font:800 13px Manrope;color:#ff9b4a;margin-bottom:4px}.finish-banner span{font-size:10px;color:#c9d8df;line-height:1.5}
+    .finish-screen{display:none;position:absolute;inset:0;z-index:70;align-items:center;justify-content:center;padding:22px;background:rgba(2,10,16,.78);backdrop-filter:blur(12px)}.finish-screen.show{display:flex}.finish-card{width:min(520px,100%);padding:30px 28px;border:1px solid rgba(255,140,50,.5);border-radius:22px;background:linear-gradient(155deg,rgba(17,37,50,.98),rgba(4,15,24,.98));box-shadow:0 26px 90px rgba(0,0,0,.55);text-align:center}.finish-flag{font-size:38px;margin-bottom:8px}.finish-kicker{font:800 10px Manrope;letter-spacing:.22em;color:#ff9b4a;text-transform:uppercase}.finish-card h2{font:800 clamp(30px,6vw,48px) Manrope;letter-spacing:-.05em;margin:9px 0 8px}.finish-card p{font-size:12px;color:#bdcdd6;line-height:1.65;margin:0 auto 22px;max-width:390px}.finish-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 22px}.finish-stat{border:1px solid rgba(255,255,255,.1);border-radius:13px;padding:13px 10px;background:rgba(255,255,255,.035)}.finish-stat span{display:block;color:#91a8b7;font-size:9px;text-transform:uppercase;letter-spacing:.12em;margin-bottom:5px}.finish-stat strong{font:800 18px Manrope;color:#f4f8fb}.finish-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:9px}.finish-actions button{min-width:145px;justify-content:center}
+    @media(max-width:700px){.ranking-pop{left:64px;width:calc(100vw - 84px);max-height:50vh}.finish-banner{right:10px;bottom:180px;max-width:calc(100% - 20px)}.ranking-row{padding:6px 3px}.finish-card{padding:24px 17px}.finish-actions button{flex:1;min-width:120px}}
     .set-card .helper b{color:#dcebf1}
     @media(max-width:700px){.ranking-pop{left:64px;width:calc(100vw - 84px);max-height:50vh}.finish-banner{right:10px;bottom:180px;max-width:calc(100% - 20px)}.ranking-row{padding:6px 3px}}
 
@@ -309,6 +311,9 @@
         <div class="sail-decision" id="sailDecision"></div></div>
       <div class="dock-pop" id="popRoute"><button class="pop-x" data-close="popRoute">✕</button><div id="routePopupBody"></div></div>
       <div class="dock-pop ranking-pop" id="popRanking"><button class="pop-x" data-close="popRanking">✕</button><div class="ranking-head">CLASSEMENT DE LA COURSE</div><div class="ranking-note" id="rankingNote">Préparation de la flotte IA…</div><div id="rankingBody"></div></div>
+      <div class="finish-screen" id="finishScreen" role="dialog" aria-modal="true" aria-labelledby="finishScreenTitle" aria-hidden="true">
+        <div class="finish-card"><div class="finish-flag">🏁</div><div class="finish-kicker">LIGNE D’ARRIVÉE FRANCHIE</div><h2 id="finishScreenTitle">ARRIVÉE !</h2><p id="finishScreenCopy">Tu as franchi la ligne orange. Voici ton résultat.</p><div class="finish-stats"><div class="finish-stat"><span>Temps de course</span><strong id="finishScreenTime">—</strong></div><div class="finish-stat"><span>Classement</span><strong id="finishScreenRank">—</strong></div></div><div class="finish-actions"><button class="btn primary" id="finishShowRanking">Voir le classement</button><button class="btn ghost" id="finishCloseScreen">Retour à la carte</button></div></div>
+      </div>
       <div class="finish-banner" id="raceFinishBanner"><strong id="finishTitle">ARRIVÉE !</strong><span id="finishText">Classement provisoire.</span></div>
       <button class="dock-btn wx-btn" id="dockWx" title="Météo et vent">🌬️</button>
       <div class="dock-pop wx-pop" id="popWx"><button class="pop-x" data-close="popWx">✕</button>
@@ -338,7 +343,7 @@
     position:{lat:48.69,lng:-2.16}, start:{lat:48.69,lng:-2.16}, finish:{lat:16.20,lng:-61.59},
     startCity:{lat:48.649,lng:-2.025}, finishCity:{lat:16.241,lng:-61.534},
     routeDistance:3542, landData:null, landReady:false, landPromise:null, map:null, mapType:'satellite',
-    boatMarker:null, routeLine:null, trackLine:null, startGateLine:null, finishGateLine:null,
+    boatMarker:null, routeLine:null, trackLine:null, startGateLine:null, finishGateLine:null, finishGatePoints:null, finishScreenShown:false,
     track:[], lastWeather:0, weatherModels:{ecmwf:null,gfs:null}, mapReady:false,
     weatherLayer:'wind', weatherGrid:[], weatherGridRows:0, weatherGridCols:0,
     screenWeatherGrid:null, weatherFieldDirty:true, weatherParticles:[], weatherCanvas:null,
@@ -428,7 +433,7 @@
     RT.coarse=null;RT.fine=null;
     state.windReady=false;state.windSource='';state.windSpeed=0;state.windDir=240;
     LW.pts=null;LW.center=null;LW.at=0;LW.fail=0;LW.pending=false;
-    clearBotMarkers();state.bots=[];state.playerFinished=false;state.finishTime=null;state.weatherPreviewHours=0;if($('weatherPreview'))$('weatherPreview').value='0';if($('weatherPreviewLabel'))$('weatherPreviewLabel').textContent='APERÇU MÉTÉO · MAINTENANT';state.sail='jib';state.sailChangeAt=-999;LW.pts=null;LW.cur=null;LW.fail=0;state.twaLock=null;state.paused=!state.landReady;
+    clearBotMarkers();state.bots=[];state.playerFinished=false;state.finishTime=null;state.finishGatePoints=null;state.finishScreenShown=false;$('finishScreen').classList.remove('show');$('finishScreen').setAttribute('aria-hidden','true');$('raceFinishBanner').classList.remove('show');state.weatherPreviewHours=0;if($('weatherPreview'))$('weatherPreview').value='0';if($('weatherPreviewLabel'))$('weatherPreviewLabel').textContent='APERÇU MÉTÉO · MAINTENANT';state.sail='jib';state.sailChangeAt=-999;LW.pts=null;LW.cur=null;LW.fail=0;state.twaLock=null;state.paused=!state.landReady;
     $('timeScale').textContent='×'+state.timeScale;
     if(state.landReady){buildCoastMask();initBots();}
     const resumed=await restoreProgress(id);
@@ -484,7 +489,7 @@
     state.routeLine=L.polyline([], {color:'#e7c78a',weight:2.5,dashArray:'8 9',opacity:.92}).addTo(state.map);
     state.trackLine=L.polyline([], {color:'#5ed8e8',weight:3,opacity:.95}).addTo(state.map);
     state.startGateLine=L.polyline([], {color:'#5ed8e8',weight:5,opacity:1,className:'vr-gate-start'}).addTo(state.map);
-    state.finishGateLine=L.polyline([], {color:'#e7c78a',weight:5,opacity:1,className:'vr-gate-finish'}).addTo(state.map);
+    state.finishGateLine=L.polyline([], {color:'#ff8c32',weight:6,opacity:1,className:'vr-gate-finish'}).addTo(state.map);
     state.boatMarker=L.marker([state.position.lat,state.position.lng],{icon:createBoatIcon(),pane:'markerPane',zIndexOffset:1200,keyboard:false}).addTo(state.map);
     drawRaceMap();
     state.weatherCanvas=$('weatherCanvas');weatherPane.appendChild(state.weatherCanvas);state.weatherCanvas.style.inset='auto';state.weatherCanvas.style.right='auto';state.weatherCanvas.style.bottom='auto';state.weatherCtx=state.weatherCanvas.getContext('2d');positionWeatherCanvas();resizeWeatherCanvas();
@@ -526,14 +531,16 @@
     state.boatMarker.setLatLng([state.position.lat,state.position.lng]);updateBoatIcon();
     const course=bearing(state.start,state.finish);
     const startGate=gatePoints(state.start,course,2.0),finishGate=gatePoints(state.finish,(course+180)%360,2.0);
+    state.finishGatePoints=finishGate;
     state.startGateLine.setLatLngs(startGate.map(p=>[p.lat,p.lng]));
+    state.finishGateLine.setStyle({color:'#ff8c32',weight:6,opacity:1});
     state.finishGateLine.setLatLngs(finishGate.map(p=>[p.lat,p.lng]));
     state.endpointLayers.forEach(m=>state.map.removeLayer(m));state.endpointLayers=[];
     state.cityLayers.forEach(m=>state.map.removeLayer(m));state.cityLayers=[];
     const startDot=L.circleMarker([state.start.lat,state.start.lng],{radius:4,color:'#06141d',weight:2,fillColor:'#5ed8e8',fillOpacity:1}).bindTooltip('Ligne de départ virtuelle');
-    const finishDot=L.circleMarker([state.finish.lat,state.finish.lng],{radius:4,color:'#06141d',weight:2,fillColor:'#e7c78a',fillOpacity:1}).bindTooltip('Ligne d’arrivée virtuelle');
+    const finishDot=L.circleMarker([state.finish.lat,state.finish.lng],{radius:5,color:'#06141d',weight:2,fillColor:'#ff8c32',fillOpacity:1}).bindTooltip('Ligne d’arrivée orange : franchis-la pour terminer');
     state.endpointLayers.push(startDot.addTo(state.map),finishDot.addTo(state.map));
-    addCityLabel(state.startCity,state.startCityName||'DÉPART','#5ed8e8');addCityLabel(state.finishCity,state.finishCityName||'ARRIVÉE','#e7c78a');drawZones();
+    addCityLabel(state.startCity,state.startCityName||'DÉPART','#5ed8e8');addCityLabel(state.finishCity,state.finishCityName||'ARRIVÉE','#ff8c32');drawZones();
     renderBotMarkers();state.weatherFieldDirty=true;
     if(state.fitRouteOnNextDraw!==false){state.map.fitBounds(state.routeLine.getBounds(),{padding:[65,90],maxZoom:5});state.fitRouteOnNextDraw=false;}
   }
@@ -658,7 +665,29 @@
     if(state.sailMode!=='auto'&&state.sail!==s){state.sail=s;state.sailChangeAt=state.simTime;}updateInstruments();});});
   $('timeScale').onclick=()=>{const L=[60,300,600];state.timeScale=L[(L.indexOf(state.timeScale)+1)%L.length];SET.timeScale=String(state.timeScale);$('setTimeScale').value=SET.timeScale;saveSet();$('timeScale').textContent='×'+state.timeScale;toast('Temps de jeu ×'+state.timeScale);};
 
+  function finishGateCrossing(previous,next){
+    const gate=state.finishGatePoints;
+    if(!gate||gate.length!==2||!previous||!next)return null;
+    const lat0=state.finish.lat,scaleX=60*Math.max(.05,Math.cos(lat0*RAD));
+    const local=p=>({x:(p.lng-state.finish.lng)*scaleX,y:(p.lat-lat0)*60});
+    const P=local(previous),Q=local(next),A=local(gate[0]),B=local(gate[1]);
+    const rx=Q.x-P.x,ry=Q.y-P.y,sx=B.x-A.x,sy=B.y-A.y;
+    const den=rx*sy-ry*sx;if(Math.abs(den)<1e-10)return null;
+    const apx=A.x-P.x,apy=A.y-P.y;
+    const t=(apx*sy-apy*sx)/den,u=(apx*ry-apy*rx)/den;
+    const course=bearing(state.start,state.finish)*RAD,dx=Math.sin(course),dy=Math.cos(course);
+    const before=P.x*dx+P.y*dy,after=Q.x*dx+Q.y*dy;
+    if(before>1e-4||after<-1e-4||t<0||t>1||u<0||u>1)return null;
+    return {lat:previous.lat+(next.lat-previous.lat)*t,lng:previous.lng+(next.lng-previous.lng)*t};
+  }
+  function completePlayerFinish(point){
+    if(state.playerFinished)return;
+    state.position=point;state.playerFinished=true;state.finishTime=state.simTime;state.speed=0;
+    updateInstruments();updateStandings();showFinishScreen();
+    toast('Ligne orange franchie : arrivée !');
+  }
   function moveBoat(dt){
+    const previousPosition={...state.position};
     const sdt=dt*state.timeScale,lw=gameWind(state.position);
     if(lw){const k=1-Math.exp(-sdt/60);state.windSpeed+=(lw.speed-state.windSpeed)*k;state.windDir=(state.windDir+(((lw.dir-state.windDir+540)%360)-180)*k+360)%360;state.windReady=true;}
     if(state.landReady&&!state.paused&&!fcAt(state.position)&&(!LW.pts||Math.max(Math.abs(state.position.lat-LW.center.lat),Math.abs(state.position.lng-LW.center.lng))>.6||Date.now()-LW.at>20*60*1000))refreshLocalWind();
@@ -676,10 +705,10 @@
       for(let i=1;i<=steps;i++){const p=destination(state.position,cog,nm*i/steps);if(isLand(p)||inZone(p)){blocked=true;break;}next=p;}
       if(blocked){state.speed=0;if(Date.now()-state.lastGroundToast>4000){state.lastGroundToast=Date.now();toast('Côte devant : bateau immobilisé, change de cap.');}}
       state.position=next;
+      if(!state.playerFinished){const crossing=finishGateCrossing(previousPosition,state.position);if(crossing)completePlayerFinish(crossing);}
       if(!state.track.length||distanceNm(state.track[state.track.length-1],state.position)>.12){state.track.push({...state.position});if(state.track.length>1800)state.track.shift();}
       updateMapPosition();
     }
-    if(!state.playerFinished&&distanceNm(state.position,state.finish)<=.8){state.position={...state.finish};state.playerFinished=true;state.finishTime=state.simTime;state.speed=0;state.track.push({...state.finish});updateMapPosition();toast('Arrivée ! Consulte le classement pour connaître ta place.');}
     updateInstruments();
   }
   // ===== Routage par isochrones v2 : GFS 16 jours · grille en couloir · courants · zones d'exclusion =====
@@ -986,7 +1015,7 @@
       const lateral=(count===1?0:(i/(count-1)-.5)*3.2);
       let pos=destination(state.start,lateral>=0?axis:(axis+180)%360,Math.abs(lateral));
       if(isLand(pos)||inZone(pos))pos={...state.start};
-      state.bots.push({id:i,name:BOT_NAMES[i],level,skill,performance:.80+skill*.20,position:pos,heading:bearing(pos,state.finish),speed:0,sail:'jib',finished:false,finishTime:null,nextDecisionAt:Math.random()*900,decisionInterval:900+(1-skill)*2700,marker:null,color:BOT_COLORS[i],lastWind:state.windReady?{speed:state.windSpeed,dir:state.windDir,cu:0,cv:0}:null});
+      state.bots.push({id:i,name:BOT_NAMES[i],level,skill,performance:.80+skill*.20,position:pos,heading:bearing(pos,state.finish),speed:0,sail:'jib',finished:false,finishTime:null,nextDecisionAt:Math.random()*900,decisionInterval:3600+(1-skill)*1800,marker:null,color:BOT_COLORS[i],lastWind:state.windReady?{speed:state.windSpeed,dir:state.windDir,cu:0,cv:0}:null});
     }
     renderBotMarkers();updateStandings();
   }
@@ -1001,51 +1030,58 @@
       else{bot.marker.setLatLng([bot.position.lat,bot.position.lng]);bot.marker.setIcon(botMarkerIcon(bot));}
     });
   }
+  function botPointBlocked(point){
+    // Le masque côtier accélère énormément les contrôles. Le polygone exact
+    // reste utilisé pour les cellules qui touchent réellement le rivage.
+    return inZone(point)||(RT.coast?fastLand(point):isLand(point));
+  }
   function botCourseIsClear(bot,cog,lookAheadNm){
-    // Vérifie le trajet réel sur le fond (cap + courant), pas seulement le cap
-    // du bateau. Des points rapprochés évitent de manquer une pointe de côte.
-    const steps=Math.max(2,Math.ceil(lookAheadNm/.25));
+    const steps=Math.max(3,Math.ceil(lookAheadNm/.4));
     for(let i=1;i<=steps;i++){
       const p=destination(bot.position,cog,lookAheadNm*i/steps);
-      if(isLand(p)||inZone(p))return false;
+      if(botPointBlocked(p))return false;
     }
     return true;
   }
   function botHeadingChoice(bot,w){
-    const target=bearing(bot.position,state.finish),step=bot.skill>.78?5:10;
-    const horizons=[Math.max(2.5,Math.min(5.5,(bot.speed||10)*.28)),1.25];
-    for(const lookAhead of horizons){
-      let best=null,bestScore=-Infinity,bestSail='jib';
-      for(let h=0;h<360;h+=step){
-        const twa=Math.abs(signedTwa(h,w.dir));
-        const j=polarSpeed('jib',twa,w.speed),sp=polarSpeed('spi',twa,w.speed);
-        const sail=sp>j*1.04?'spi':'jib',boatSpeed=Math.max(j,sp)*bot.performance;
-        const hr=h*RAD,bx=Math.sin(hr)*boatSpeed+(state.useCurrent?(w.cu||0):0);
-        const by=Math.cos(hr)*boatSpeed+(state.useCurrent?(w.cv||0):0);
-        const ground=Math.hypot(bx,by),cog=(Math.atan2(bx,by)/RAD+360)%360;
-        if(ground<.15||!botCourseIsClear(bot,cog,lookAhead))continue;
-        let score=ground*Math.cos(angleDiff(cog,target)*RAD);
-        const turn=Math.abs(((h-bot.heading+540)%360)-180);
-        score-=turn*(1-bot.skill)*.035;
-        // Les meilleurs barreurs tiennent aussi compte du vent prévu plus loin.
-        if(bot.skill>.72){
-          const future=gameWindAt(destination(bot.position,cog,Math.min(3,Math.max(.5,boatSpeed*.08))),weatherTimeMs()+2*3600000);
-          if(future){
-            const futureTwa=Math.abs(signedTwa(h,future.dir));
-            const futureSpeed=Math.max(polarSpeed('jib',futureTwa,future.speed),polarSpeed('spi',futureTwa,future.speed));
-            score=score*.82+futureSpeed*Math.cos(angleDiff(cog,target)*RAD)*.18;
-          }
-        }
-        if(score>bestScore){bestScore=score;best=h;bestSail=sail;}
-      }
-      if(best!==null){bot.sail=bestSail;return best;}
+    const target=bearing(bot.position,state.finish),candidates=[];
+    // 36 caps suffisent pour le choix initial. Les vérifications côtières,
+    // plus coûteuses, ne sont faites que pour les meilleurs candidats.
+    for(let h=0;h<360;h+=10){
+      const twa=Math.abs(signedTwa(h,w.dir));
+      const j=polarSpeed('jib',twa,w.speed),sp=polarSpeed('spi',twa,w.speed);
+      const sail=sp>j*1.04?'spi':'jib',boatSpeed=Math.max(j,sp)*bot.performance;
+      const hr=h*RAD,bx=Math.sin(hr)*boatSpeed+(state.useCurrent?(w.cu||0):0);
+      const by=Math.cos(hr)*boatSpeed+(state.useCurrent?(w.cv||0):0);
+      const ground=Math.hypot(bx,by),cog=(Math.atan2(bx,by)/RAD+360)%360;
+      if(ground<.15)continue;
+      let score=ground*Math.cos(angleDiff(cog,target)*RAD);
+      const turn=Math.abs(((h-bot.heading+540)%360)-180);
+      score-=turn*(1-bot.skill)*.035;
+      candidates.push({h,sail,boatSpeed,cog,score});
     }
-    // Aucun cap sûr à proximité : l'IA attend plutôt que de traverser la terre.
+    candidates.sort((a,b)=>b.score-a.score);
+    const horizons=[Math.max(2.2,Math.min(4.5,(bot.speed||10)*.24)),1.35];
+    for(const lookAhead of horizons){
+      for(const candidate of candidates.slice(0,9)){
+        if(!botCourseIsClear(bot,candidate.cog,lookAhead))continue;
+        // Les candidats sont déjà classés par progression et confort de barre.
+        // On évite ici un second accès météo pour chaque décision d'IA.
+        bot.sail=candidate.sail;return candidate.h;
+      }
+    }
     return null;
   }
+  let botsLastUpdateAt=0,botsAccumulatedDt=0;
   function updateBots(gameDt){
     if(!state.bots.length||gameDt<=0)return;
-    const pinNow=performance.now(),refreshPins=pinNow-state.botMapAt>100;
+    // Les IA évoluent à 16 Hz indépendamment du rafraîchissement de la carte.
+    // Le temps simulé est accumulé pour ne pas ralentir la course.
+    botsAccumulatedDt+=gameDt;
+    const pinNow=performance.now();
+    if(botsLastUpdateAt&&pinNow-botsLastUpdateAt<60)return;
+    gameDt=botsAccumulatedDt;botsAccumulatedDt=0;botsLastUpdateAt=pinNow;
+    const refreshPins=pinNow-state.botMapAt>450;
     if(refreshPins)state.botMapAt=pinNow;
     for(const bot of state.bots){
       if(bot.finished)continue;
@@ -1063,7 +1099,7 @@
           if(bot.marker&&Math.abs(angleDiff(previousHeading,bot.heading))>.4)bot.marker.setIcon(botMarkerIcon(bot));
           bot.nextDecisionAt=state.simTime+bot.decisionInterval;
         }else{
-          bot.speed=0;bot.grounded=true;bot.nextDecisionAt=state.simTime+120;
+          bot.speed=0;bot.grounded=true;bot.nextDecisionAt=state.simTime+900;
         }
       }
       if(bot.grounded){
@@ -1077,13 +1113,14 @@
       bot.speed+=(target-bot.speed)*(1-Math.exp(-gameDt/(bot.skill>.8?13:22)));
       const hr=bot.heading*RAD,bx=Math.sin(hr)*bot.speed+(state.useCurrent?(w.cu||0):0);
       const by=Math.cos(hr)*bot.speed+(state.useCurrent?(w.cv||0):0);
+      const previousBotPosition={...bot.position};
       const ground=Math.hypot(bx,by),cog=(Math.atan2(bx,by)/RAD+360)%360,nm=ground*gameDt/3600;
       if(nm>0){
         let next=bot.position,blocked=false;
-        const steps=Math.max(1,Math.ceil(nm/.12));
+        const steps=Math.max(1,Math.ceil(nm/.2));
         for(let k=1;k<=steps;k++){
           const p=destination(bot.position,cog,nm*k/steps);
-          if(isLand(p)||inZone(p)){blocked=true;break;}
+          if(botPointBlocked(p)){blocked=true;break;}
           next=p;
         }
         if(blocked){
@@ -1092,16 +1129,10 @@
           bot.nextDecisionAt=state.simTime;
         }else bot.position=next;
       }
-      if(!bot.grounded&&distanceNm(bot.position,state.finish)<=.8){
-        bot.position={...state.finish};bot.finished=true;bot.finishTime=state.simTime;bot.speed=0;
-      }
+      if(!bot.grounded&&!bot.finished){const crossing=finishGateCrossing(previousBotPosition,bot.position);if(crossing){bot.position=crossing;bot.finished=true;bot.finishTime=state.simTime;bot.speed=0;}}
       if(refreshPins&&bot.marker)bot.marker.setLatLng([bot.position.lat,bot.position.lng]);
     }
-    if(!state.playerFinished&&distanceNm(state.position,state.finish)<=.8){
-      state.position={...state.finish};state.playerFinished=true;state.finishTime=state.simTime;state.speed=0;state.track.push({...state.finish});updateMapPosition();
-      toast('Arrivée ! Consulte le classement pour connaître ta place.');
-    }
-    if(performance.now()-state.botBoardAt>1500){state.botBoardAt=performance.now();updateStandings();}
+    if(performance.now()-state.botBoardAt>3000){state.botBoardAt=performance.now();updateStandings();}
   }
   function formatRaceTime(seconds){if(!Number.isFinite(seconds))return '—';const h=Math.floor(seconds/3600),d=Math.floor(h/24),hh=h%24,mm=Math.floor(seconds%3600/60);return d?d+' j '+hh+' h':hh+' h '+mm+' min';}
   function standings(){
@@ -1114,6 +1145,17 @@
     body.innerHTML=rows.map((r,i)=>'<div class="ranking-row '+(r.isPlayer?'me ':'')+(r.finished?'finished':'')+'"><span class="rank">'+(i+1)+'</span><span class="name">'+r.name+'<small class="level">'+r.level+(r.finished?' · arrivé en '+formatRaceTime(r.finishTime):'')+'</small></span><span class="distance">'+(r.finished?'ARRIVÉ':Math.round(distanceNm(r.position,state.finish))+' nm')+'</span></div>').join('');
     if(state.playerFinished){const rank=rows.findIndex(r=>r.isPlayer)+1,final=done===total;$('raceFinishBanner').classList.add('show');$('finishTitle').textContent=final?'CLASSEMENT FINAL':'ARRIVÉE — '+rank+(rank===1?'ère':'e')+' PLACE';$('finishText').textContent=final?'Tu termines '+rank+'e sur '+total+' concurrents.':'Classement provisoire : '+rank+'e sur '+total+'. Les IA poursuivent la course.';}
   }
+  function showFinishScreen(){
+    if(state.finishScreenShown)return;
+    state.finishScreenShown=true;
+    const rows=standings(),rank=rows.findIndex(r=>r.isPlayer)+1,total=rows.length,done=rows.filter(r=>r.finished).length;
+    $('finishScreenTime').textContent=formatRaceTime(state.finishTime);
+    $('finishScreenRank').textContent=(rank===1?'1ère':rank+'e')+' / '+total;
+    $('finishScreenCopy').textContent='Tu as franchi la ligne orange en '+rank+(rank===1?'ère':'e')+' position. '+done+' bateau(x) sur '+total+' ont déjà terminé.';
+    $('finishScreen').classList.add('show');$('finishScreen').setAttribute('aria-hidden','false');
+  }
+  $('finishShowRanking').addEventListener('click',()=>{$('finishScreen').classList.remove('show');$('finishScreen').setAttribute('aria-hidden','true');$('popRanking').classList.add('open');updateStandings();});
+  $('finishCloseScreen').addEventListener('click',()=>{$('finishScreen').classList.remove('show');$('finishScreen').setAttribute('aria-hidden','true');});
 
   async function ensureCoarse(force){
     if(RT.coarsePromise)return RT.coarsePromise;
@@ -1172,24 +1214,30 @@
     drawWeatherOverlay(0);return true;
   }
   function gridFromForecast(){
-    // Le couloir météo ne couvre pas nécessairement tout l'écran : les points
-    // hors couloir restent marqués indisponibles, sans faire disparaître le vent
-    // valide dans les autres cellules.
-    if(!state.map||!(RT.coarse||RT.fine))return false;
-    const pts=gridCoordinates(true);if(!pts.length)return false;
-    const tg=weatherDisplayTimeMs();let validPoints=0;
-    state.weatherGrid=pts.map(p=>{
-      let w=gameWindAt(p,tg);
-      if((!w||!Number.isFinite(w.speed)||!Number.isFinite(w.dir))&&state.weatherPreviewHours===0&&LW.pts&&LW.center&&Math.abs(p.lat-LW.center.lat)<=1&&Math.abs(p.lng-LW.center.lng)<=1)w=sampleLocalWind(p);
-      const ok=!!w&&Number.isFinite(w.speed)&&Number.isFinite(w.dir);
+    // Affiche directement les nœuds NOAA réellement décodés. On évite ainsi
+    // les échantillons écran hors du couloir qui pouvaient annuler tout le champ.
+    const fc=RT.fine||RT.coarse;
+    if(!state.map||!fc||!fc.w||!fc.map||!fc.lats||!fc.lngs)return false;
+    const tg=weatherDisplayTimeMs(),nt=fc.w.NT,th=clamp((tg-fc.t0)/3600000,0,nt-1.001),it=Math.floor(th),tt=th-it;
+    const pts=[];let validPoints=0;
+    for(let row=0;row<fc.lats.length;row++)for(let col=0;col<fc.nx;col++){
+      const pointIndex=fc.map[row*fc.nx+col];
+      // Conserve TOUS les nœuds pour garder les coordonnées écran monotones.
+      // Seules les cellules ayant quatre valeurs valides alimenteront le vent.
+      if(pointIndex<0){pts.push({lat:fc.lats[row],lng:fc.lngs[col],row,col,speed:null,dir:null});continue;}
+      const k=pointIndex*nt+it,u0=fc.w.u[k],u1=fc.w.u[k+1],v0=fc.w.v[k],v1=fc.w.v[k+1];
+      const u=u0+(u1-u0)*tt,v=v0+(v1-v0)*tt;
+      if(!Number.isFinite(u)||!Number.isFinite(v)){pts.push({lat:fc.lats[row],lng:fc.lngs[col],row,col,speed:null,dir:null});continue;}
+      const speed=Math.hypot(u,v),dir=(Math.atan2(-u,-v)/RAD+360)%360;
+      const ok=Number.isFinite(speed)&&Number.isFinite(dir);
       if(ok)validPoints++;
-      return {...p,speed:ok?w.speed:null,dir:ok?w.dir:null};
-    });
+      pts.push({lat:fc.lats[row],lng:fc.lngs[col],row,col,speed:ok?speed:null,dir:ok?dir:null});
+    }
     if(!validPoints)return gridFromLocalWind();
+    state.weatherGrid=pts;state.weatherGridRows=fc.lats.length;state.weatherGridCols=fc.nx;
     state.lastGridFetch=Date.now();state.screenWeatherGrid=null;state.weatherFieldDirty=true;
     const grid=buildScreenWeatherGrid();
     if(!grid||!grid.validCells.length)return gridFromLocalWind();
-    const fc=RT.fine||RT.coarse;
     $('weatherGridStatus').textContent='NOAA GFS · '+fc.step+'° · '+grid.validCells.length+' cellules';
     $('weatherLayerCaption').textContent='NOAA GFS · prévision '+fmtT(tg)+' UTC';
     drawWeatherOverlay(0);return true;
@@ -1246,7 +1294,7 @@
     const size=state.map.getSize(),dpr=Math.min(window.devicePixelRatio||1,1.5);
     state.weatherCanvas.width=Math.max(1,Math.round(size.x*dpr));state.weatherCanvas.height=Math.max(1,Math.round(size.y*dpr));
     state.weatherCanvas.style.width=size.x+'px';state.weatherCanvas.style.height=size.y+'px';state.weatherCtx.setTransform(dpr,0,0,dpr,0,0);
-    const count=Math.max(220,Math.min(430,Math.round(size.x*size.y/2600)));
+    const count=Math.max(70,Math.min(140,Math.round(size.x*size.y/7000)));
     state.weatherParticles=Array.from({length:count},()=>({x:Math.random()*size.x,y:Math.random()*size.y,age:Math.random()*9,history:[]}));
     state.weatherFieldDirty=true;
   }
@@ -1305,14 +1353,21 @@
   async function fetchMulti(url){return omGet(url);}
   function omRefreshInfo(){const el=$('setWxQuota');if(!el)return;if(!$('setCur').checked){el.textContent='Vent : NOAA GFS direct, sans quota quotidien d’API météo. Open-Meteo n’est pas appelé tant que les courants marins facultatifs restent désactivés.';return;}el.textContent='Open-Meteo est utilisé uniquement pour les courants marins facultatifs. Quota estimé sur ce navigateur : '+Math.round(omUsed(6e4))+' / 600 par minute · '+Math.round(omUsed(36e5))+' / 5 000 par heure · '+Math.round(omUsed(864e5))+' / 10 000 par jour. Dernier appel : '+OMQ.last+(Date.now()<OMQ.blockedUntil?' · bloqué jusqu’à '+omHHMM(OMQ.blockedUntil):'')+'.';}
   async function refreshWeatherGrid(force=false){
-    if(!state.map||state.gridFetchPending||RT.loadingFc)return;
+    if(!state.map||state.gridFetchPending)return;
     if(Date.now()<(state.gridFailUntil||0))return;
     if(!force&&Date.now()-state.lastGridFetch<20*60*1000)return;
     state.gridFetchPending=true;
     try{
       if(gridFromForecast())return;
-      $('weatherGridStatus').textContent='NOAA GFS · prévisions en préparation';
-      $('mapNotice').innerHTML='<strong>CHARGEMENT NOAA GFS</strong><br>Le champ de vent sera affiché dès que les GRIB2 du couloir de course seront décodés.';
+      if(RT.loadingFc)return; // un routage NOAA est déjà en train de remplir la grille
+      if(!RT.coarse&&!RT.coarsePromise&&state.landReady){
+        $('weatherGridStatus').textContent='NOAA GFS · chargement du modèle';
+        await ensureCoarse(false);
+        if(gridFromForecast())return;
+      }
+      if(LW.pts&&gridFromLocalWind())return;
+      $('weatherGridStatus').textContent='NOAA GFS · données météo en préparation';
+      $('mapNotice').innerHTML='<strong>CHARGEMENT NOAA GFS</strong><br>Le champ de vent apparaîtra dès que les données du modèle auront été décodées.';
     }catch(err){
       $('weatherGridStatus').textContent='Vent NOAA indisponible';
       $('mapNotice').innerHTML='<strong>CHAMP DE VENT INDISPONIBLE</strong><br>'+err.message;
@@ -1375,8 +1430,10 @@
     }else{p.x=Math.random()*size.x;p.y=Math.random()*size.y;}
     p.age=0;p.history=[];
   }
+  let weatherLastDrawAt=0;
   function drawWeatherOverlay(dt=0){
     if(!state.map||!state.weatherCtx||!state.weatherCanvas)return;
+    if(dt>0){const now=performance.now();if(now-weatherLastDrawAt<50)return;dt=Math.min(.12,weatherLastDrawAt?(now-weatherLastDrawAt)/1000:dt);weatherLastDrawAt=now;}
     const ctx=state.weatherCtx,size=state.map.getSize();
     if(state.weatherCanvas.width===0||state.weatherCanvas.height===0)resizeWeatherCanvas();
     ctx.clearRect(0,0,size.x,size.y);if(state.weatherLayer==='off')return;
@@ -1388,7 +1445,7 @@
       let f=sampleWind(p.x,p.y,grid);
       if(!f||f.speed<.2||p.age>12){resetParticle(p,size,grid);f=sampleWind(p.x,p.y,grid);if(!f)continue;}
       const norm=Math.max(.001,f.speed),pxPerSecond=5+f.speed*1.45;
-      if(dt>0){p.x+=(f.u/norm)*pxPerSecond*dt;p.y+=(f.v/norm)*pxPerSecond*dt;p.age+=dt;p.history.push({x:p.x,y:p.y,speed:f.speed});if(p.history.length>30)p.history.shift();}
+      if(dt>0){p.x+=(f.u/norm)*pxPerSecond*dt;p.y+=(f.v/norm)*pxPerSecond*dt;p.age+=dt;p.history.push({x:p.x,y:p.y,speed:f.speed});if(p.history.length>10)p.history.shift();}
       if(p.x<0||p.x>size.x||p.y<0||p.y>size.y){resetParticle(p,size);continue;}
       if(p.history.length>1){
         for(let i=1;i<p.history.length;i++){
@@ -1414,7 +1471,7 @@
   }
   setInterval(()=>refreshWeather(true),15*60*1000);
 
-  let lastFrame=performance.now();function frame(now){const dt=Math.min((now-lastFrame)/1000,.08);lastFrame=now;if(state.view==='race'){moveBoat(dt);drawWeatherOverlay(dt);if(now-RT.projAt>3000){RT.projAt=now;updateProjection();updateBoatIcon();}if(RT.coarse&&now-(RT.gridAt||0)>15000){RT.gridAt=now;gridFromForecast();}}requestAnimationFrame(frame);}requestAnimationFrame(frame);
+  let lastFrame=performance.now();function frame(now){const dt=Math.min((now-lastFrame)/1000,.08);lastFrame=now;if(state.view==='race'){moveBoat(dt);drawWeatherOverlay(dt);if(now-RT.projAt>3000){RT.projAt=now;updateProjection();updateBoatIcon();}if(RT.coarse&&now-(RT.gridAt||0)>30000){RT.gridAt=now;gridFromForecast();}}requestAnimationFrame(frame);}requestAnimationFrame(frame);
   window.addEventListener('resize',()=>{if(state.map){state.map.invalidateSize();positionWeatherCanvas();resizeWeatherCanvas();state.weatherFieldDirty=true;}});
   // ===== Interface v11 : dock · paramètres IA · météo étalée · sauvegarde locale/serveur =====
   const SETKEY='vr_settings_v1',SET=Object.assign({grid:'2',cur:false,auto:true,passive:true,color:'#ef7867',botCount:20,botDifficulty:'normal',timeScale:'600',weatherRate:'0.75'},(()=>{try{return JSON.parse(localStorage.getItem(SETKEY)||'{}');}catch(e){return {};}})());
@@ -1469,7 +1526,7 @@
       if(RT.coarse){const r=advanceOffline(Math.min(away,16*864e5));toast('Progression passive : +'+Math.round(r.nm)+' nm en '+(r.hours<48?Math.round(r.hours)+' h':(r.hours/24).toFixed(1)+' j')+(r.blocked?' · arrêté par la côte':''));}
       else toast('Météo indisponible : progression passive impossible.');
     }else toast('Progression restaurée');
-    renderBotMarkers();updateStandings();return true;
+    renderBotMarkers();updateStandings();if(state.playerFinished)showFinishScreen();return true;
   }
   function updateSetInfo(){
     omRefreshInfo();
