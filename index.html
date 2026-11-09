@@ -318,13 +318,89 @@
       .subview{padding:90px 15px 28px}
     }
 
+
+    /* APEX OCEAN — emblème voile & vague */
+    .brand-mark{display:grid;place-items:center;background:transparent;border:0;border-radius:0;box-shadow:none;overflow:visible}
+    .apex-symbol{display:block;width:100%;height:100%;overflow:visible}
+    .apex-symbol path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+    .apex-symbol .apex-sail{stroke:#b6c9bf;stroke-width:4.2}
+    .apex-symbol .apex-orbit{stroke:#c3ad82;stroke-width:3.7}
+    .apex-symbol .apex-water{stroke:#8caea5;stroke-width:4}
+    .brand-mark .apex-symbol{width:58px;height:58px}
+    .page-wave-mark{width:88px;height:88px;display:grid;place-items:center;border:1px solid rgba(195,211,202,.35);border-radius:22px;background:rgba(7,23,34,.66);box-shadow:0 12px 35px rgba(0,0,0,.2);backdrop-filter:blur(7px)}
+    .page-wave-mark .apex-symbol{width:70px;height:70px}
+    .page-wave-mark .apex-sail{stroke:#e4eee8}
+    .page-wave-mark .apex-orbit{stroke:#d3ba8b}
+    .page-wave-mark .apex-water{stroke:#a8c7ba}
+    .page-wave{
+      position:fixed;inset:0;z-index:200;pointer-events:none;visibility:hidden;
+      transform:translate3d(-112vw,0,0);overflow:hidden;will-change:transform;
+    }
+    .page-wave.play{
+      visibility:visible;
+      animation:apexOceanSweep 1480ms cubic-bezier(.68,0,.22,1) both;
+    }
+    .page-wave .apex-wave-art{position:absolute;inset:0;width:100%;height:100%;display:block}
+    .page-wave .wave-body{fill:url(#apexWaveGradient)}
+    .page-wave .wave-depth{fill:#0b1c29;opacity:.55}
+    .page-wave .foam-shadow{fill:none;stroke:#07141e;stroke-width:29;stroke-linecap:round;stroke-linejoin:round;opacity:.68}
+    .page-wave .foam-main{fill:none;stroke:url(#apexFoamGradient);stroke-width:13;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 8px rgba(225,239,230,.28))}
+    .page-wave .foam-highlight{fill:none;stroke:#f0f4ec;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:28 18;opacity:.88}
+    .page-wave .foam-trail{fill:none;stroke:rgba(218,234,225,.46);stroke-width:4;stroke-linecap:round;stroke-dasharray:14 13}
+    .page-wave .foam-spray{fill:#e8f1e9;opacity:.7}
+    .page-wave .foam-spray circle{transform-box:fill-box;transform-origin:center;animation:apexFoamSparkle 900ms ease-in-out infinite alternate}
+    .page-wave .foam-spray circle:nth-child(3n){animation-delay:-280ms}
+    .page-wave .foam-spray circle:nth-child(3n + 1){animation-delay:-560ms}
+    .page-wave-logo{
+      position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.92);
+      display:flex;flex-direction:column;align-items:center;gap:12px;
+      color:#f0f3ee;text-align:center;text-shadow:0 3px 24px rgba(0,0,0,.38);
+      opacity:0;white-space:nowrap;
+    }
+    .page-wave.play .page-wave-logo{animation:apexLogoReveal 1480ms ease both}
+    .page-wave-logo strong{font:800 17px Manrope;letter-spacing:.24em}
+    .page-wave-logo span{font:600 8px 'DM Sans';letter-spacing:.3em;color:#c0d0ca}
+    .page-wave-rule{width:44px;height:1px;margin-top:2px;background:linear-gradient(90deg,transparent,#c3ad82,transparent)}
+    @keyframes apexOceanSweep{
+      0%{transform:translate3d(-112vw,0,0)}
+      36%,66%{transform:translate3d(56vw,0,0)}
+      100%{transform:translate3d(122vw,0,0)}
+    }
+    @keyframes apexLogoReveal{
+      0%,27%{opacity:0;transform:translate(-50%,-50%) scale(.88)}
+      40%,65%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+      78%,100%{opacity:0;transform:translate(-50%,-50%) scale(1.04)}
+    }
+    @keyframes apexFoamSparkle{
+      from{opacity:.38;transform:scale(.72) translateY(2px)}
+      to{opacity:.92;transform:scale(1.13) translateY(-5px)}
+    }
+    @media(max-width:900px){.brand-mark .apex-symbol{width:50px;height:50px}}
+    @media(max-width:700px){
+      .brand-mark .apex-symbol{width:46px;height:46px}
+      .page-wave-mark{width:74px;height:74px;border-radius:19px}
+      .page-wave-mark .apex-symbol{width:59px;height:59px}
+      .page-wave-logo{gap:10px}
+      .page-wave-logo strong{font-size:13px;letter-spacing:.2em}
+      .page-wave-logo span{font-size:7px}
+    }
+    @media(prefers-reduced-motion:reduce){
+      .page-wave.play{animation-duration:1ms}
+      .page-wave.play .page-wave-logo{animation:none;opacity:1;transform:translate(-50%,-50%)}
+      .page-wave .foam-spray circle{animation:none}
+    }
+
 </style>
 </head>
 <body>
 <div class="app">
   <aside class="sidebar">
     <div class="brand-lockup">
-      <div class="brand-mark" aria-hidden="true">AO</div>
+      <div class="brand-mark" aria-label="Logo Apex Ocean"><svg class="apex-symbol" viewBox="0 0 76 76" aria-hidden="true" focusable="false">
+        <path class="apex-sail" d="M9 55 32 11 48 55 M20 35 H41"/>
+        <path class="apex-orbit" d="M45 19 C58 15 68 25 68 38 C68 51 58 60 46 57"/>
+        <path class="apex-water" d="M7 63 C19 57 29 57 39 62 C50 68 60 66 69 60"/>
+      </svg></div>
       <div class="brand-copy"><strong>APEX OCEAN</strong><span>SAILING EXPERIENCE</span></div>
     </div>
     <nav class="side-nav" aria-label="Navigation principale">
@@ -498,11 +574,44 @@
 
 <div class="toast" id="toast"></div>
 <div class="page-wave" id="pageWave" aria-hidden="true">
-  <svg viewBox="0 0 1440 900" preserveAspectRatio="none" role="presentation">
-    <path class="wave-back" d="M0 132 C150 48 260 160 420 112 S700 45 860 112 S1110 166 1260 96 S1390 70 1440 100 L1440 900 L0 900 Z"/>
-    <path class="wave-front" d="M0 166 C170 92 280 194 470 145 S760 78 930 144 S1190 198 1320 132 S1400 110 1440 128 L1440 900 L0 900 Z"/>
+  <svg class="apex-wave-art" viewBox="0 0 520 900" preserveAspectRatio="none" role="presentation">
+    <defs>
+      <linearGradient id="apexWaveGradient" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#0b202d"/>
+        <stop offset=".58" stop-color="#173744"/>
+        <stop offset="1" stop-color="#34585a"/>
+      </linearGradient>
+      <linearGradient id="apexFoamGradient" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#eff4ed"/>
+        <stop offset=".52" stop-color="#c4d9cf"/>
+        <stop offset="1" stop-color="#8caea5"/>
+      </linearGradient>
+    </defs>
+    <path class="wave-body" d="M0 0 H350 C230 96 430 184 300 304 C180 424 430 558 285 692 C205 772 250 852 330 900 H0 Z"/>
+    <path class="wave-depth" d="M0 0 H255 C160 108 340 190 222 310 C115 420 335 570 210 700 C150 780 190 850 250 900 H0 Z"/>
+    <path class="foam-shadow" d="M350 -12 C230 96 430 184 300 304 C180 424 430 558 285 692 C205 772 250 852 330 912"/>
+    <path class="foam-main" d="M350 -12 C230 96 430 184 300 304 C180 424 430 558 285 692 C205 772 250 852 330 912"/>
+    <path class="foam-highlight" d="M350 -12 C230 96 430 184 300 304 C180 424 430 558 285 692 C205 772 250 852 330 912"/>
+    <path class="foam-trail" d="M260 92 C292 73 320 80 344 95 M230 282 C264 263 294 273 315 291 M245 515 C277 497 309 506 330 527 M225 757 C258 743 286 750 306 769"/>
+    <g class="foam-spray">
+      <circle cx="354" cy="55" r="8"/><circle cx="326" cy="78" r="4"/>
+      <circle cx="292" cy="164" r="6"/><circle cx="352" cy="204" r="5"/>
+      <circle cx="318" cy="324" r="8"/><circle cx="265" cy="356" r="4"/>
+      <circle cx="358" cy="468" r="6"/><circle cx="314" cy="505" r="3"/>
+      <circle cx="307" cy="646" r="7"/><circle cx="254" cy="674" r="4"/>
+      <circle cx="334" cy="815" r="6"/><circle cx="293" cy="840" r="3"/>
+    </g>
   </svg>
-  <div class="page-wave-logo"><div class="page-wave-mark">AO</div><strong>APEX OCEAN</strong><span>SAILING EXPERIENCE</span></div>
+  <div class="page-wave-logo">
+    <div class="page-wave-mark"><svg class="apex-symbol" viewBox="0 0 76 76" aria-hidden="true" focusable="false">
+        <path class="apex-sail" d="M9 55 32 11 48 55 M20 35 H41"/>
+        <path class="apex-orbit" d="M45 19 C58 15 68 25 68 38 C68 51 58 60 46 57"/>
+        <path class="apex-water" d="M7 63 C19 57 29 57 39 62 C50 68 60 66 69 60"/>
+      </svg></div>
+    <strong>APEX OCEAN</strong>
+    <span>SAILING EXPERIENCE</span>
+    <i class="page-wave-rule" aria-hidden="true"></i>
+  </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
@@ -555,8 +664,9 @@
     wave.classList.remove('play');
     wave.style.animation='none';void wave.offsetWidth;wave.style.animation='';
     wave.classList.add('play');
-    viewSwitchTimer=setTimeout(()=>applyView(name),420);
-    viewReleaseTimer=setTimeout(()=>wave.classList.remove('play'),1080);
+    const reducedMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    viewSwitchTimer=setTimeout(()=>applyView(name),reducedMotion?0:720);
+    viewReleaseTimer=setTimeout(()=>wave.classList.remove('play'),reducedMotion?45:1480);
   };
   document.querySelectorAll('.side-btn[data-view]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.view)));
   $('goRaces').onclick=$('allRaces').onclick=()=>setView('races');
