@@ -1,15 +1,15 @@
 {
   "id": "/",
-  "name": "Virtual Regatta — NOAA GFS",
-  "short_name": "Virtual Regatta",
-  "description": "Simulateur de voile avec prévisions NOAA GFS 0,25°.",
+  "name": "Apex Ocean — Sailing Experience",
+  "short_name": "Apex Ocean",
+  "description": "Simulateur de navigation à la voile avec prévisions météo NOAA GFS.",
   "lang": "fr-FR",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "landscape-primary",
-  "background_color": "#07131d",
-  "theme_color": "#07131d",
+  "background_color": "#091722",
+  "theme_color": "#091722",
   "icons": [
     {
       "src": "/icons/icon-192.png",
