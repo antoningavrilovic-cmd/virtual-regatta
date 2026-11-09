@@ -1,8 +1,8 @@
 'use strict';
 
 // VIRTUAL REGATTA PWA — service distant NOAA GFS GRIB2.
-// Node et le décodeur sont installés sur l’hébergeur, jamais sur les appareils clients.
-// Les navigateurs accèdent à l’application par une URL HTTPS.
+// Le serveur et le décodeur sont installés sur l'hébergeur, jamais sur les appareils clients.
+// Les navigateurs accèdent à l'application par une URL HTTPS.
 
 const http = require('http');
 const https = require('https');
@@ -38,8 +38,6 @@ fs.mkdirSync(FORECAST_DIR, { recursive: true });
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.webmanifest': 'application/manifest+json; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.svg': 'image/svg+xml',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -130,7 +128,7 @@ function saveAtomically(data) {
 
 // -----------------------------------------------------------------------------
 // NOAA GFS + décodage GRIB2
-// Le paquet WASM décode les champs GRIB2 NCEP GFS sans exécutable externe.
+// Décodeur TypeScript pur : messages NCEP multi-champs et packing GFS 5.3.
 // -----------------------------------------------------------------------------
 let decoderPromise = null;
 let decoderModule = null;
@@ -141,20 +139,20 @@ async function getDecoder() {
   if (!decoderPromise) {
     decoderPromise = (async () => {
       try {
-        const mod = await import('@trkbt10/grib2-wasm');
-        if (typeof mod.init !== 'function' || typeof mod.parseGrib2 !== 'function') {
-          throw new Error('Le module GRIB2 chargé ne fournit pas son API attendue.');
+        const mod = await import('@azohra/meteo.grib');
+        const required = ['splitMessages', 'parseFields', 'parseProduct', 'parseGrid', 'decodeFieldValues', 'nearestGridpoint'];
+        const missing = required.filter(name => typeof mod[name] !== 'function');
+        if (missing.length) {
+          throw new Error('API GRIB2 incomplète : ' + missing.join(', '));
         }
-        await mod.init();
         decoderModule = mod;
         decoderError = '';
+        console.log('Décodeur GRIB2 @azohra/meteo.grib chargé.');
         return mod;
       } catch (error) {
         decoderError = error && error.message ? error.message : String(error);
         decoderPromise = null;
-        throw new Error(
-          'Décodeur GRIB2 absent ou impossible à initialiser. Lance « npm install @trkbt10/grib2-wasm ». Détail : ' + decoderError
-        );
+        throw new Error('Impossible de charger @azohra/meteo.grib. Détail : ' + decoderError);
       }
     })();
   }
@@ -176,17 +174,22 @@ const forecastInflight = new Map();
 const forecastMemory = new Map();
 const localMemory = new Map();
 
-// Les prévisions complètes peuvent nécessiter plusieurs minutes à récupérer.
-// Cette file garde le travail côté serveur et permet à la PWA de suivre son état.
+
+// Les prévisions complètes peuvent prendre plusieurs minutes. Le calcul se fait
+// côté serveur et la PWA interroge ensuite l'état de la tâche.
 const gfsJobs = new Map();
 let activeGfsJob = null;
+
 function startGfsJob(points) {
   const signature = hash(JSON.stringify(points.map(p => [Number(p.lat.toFixed(4)), Number(p.lng.toFixed(4))])));
-  const existing = [...gfsJobs.values()].find(j => j.signature === signature && (j.state === 'running' || j.state === 'ready'));
+  const existing = [...gfsJobs.values()].find(job =>
+    job.signature === signature && (job.state === 'running' || job.state === 'ready')
+  );
   if (existing) return existing;
   if (activeGfsJob && activeGfsJob.state === 'running') {
     throw Object.assign(new Error('Un calcul NOAA est déjà en cours sur le serveur. Attends qu’il se termine avant de lancer une autre course.'), { statusCode: 409 });
   }
+
   const now = Date.now();
   for (const [id, job] of gfsJobs) {
     if (now - job.createdAt > 2 * 3600000) gfsJobs.delete(id);
@@ -195,6 +198,7 @@ function startGfsJob(points) {
   const job = { id, signature, state: 'running', message: 'Préparation du calcul NOAA…', createdAt: now, result: null, error: null };
   gfsJobs.set(id, job);
   activeGfsJob = job;
+
   Promise.resolve().then(() => buildForecast(points)).then(result => {
     job.result = result;
     job.state = 'ready';
@@ -210,8 +214,11 @@ function startGfsJob(points) {
   });
   return job;
 }
+
 function sendGfsJobResult(res, job) {
-  if (!job || job.state !== 'ready' || !job.result) return sendJson(res, 409, { error: 'Le résultat NOAA n’est pas encore disponible.' });
+  if (!job || job.state !== 'ready' || !job.result) {
+    return sendJson(res, 409, { error: 'Le résultat NOAA n’est pas encore disponible.' });
+  }
   return send(res, 200, job.result.payload, 'application/octet-stream', {
     'Content-Encoding': 'gzip',
     'X-VR-GFS-T0': String(job.result.t0),
@@ -415,96 +422,129 @@ async function chooseUsableRun(bbox) {
     (lastError ? lastError.message : 'Réessaie un peu plus tard.'));
 }
 
-function unwrapLongitude(lon, reference) {
-  let x = normalizeLon(lon);
-  while (x - reference > 180) x -= 360;
-  while (x - reference < -180) x += 360;
-  return x;
-}
-
-function makeGridField(decoder, handle, record) {
-  const s3 = decoder.getSection3(handle, record);
-  const nx = Number(s3.ni);
-  const ny = Number(s3.nj);
-  const values = decoder.getGridData(handle, record);
-  const lats = decoder.getLatitudes(handle, record);
-  const lons = decoder.getLongitudes(handle, record);
-  if (!Number.isInteger(nx) || !Number.isInteger(ny) || nx < 2 || ny < 2 ||
-      !values || values.length !== nx * ny || !lats || !lons ||
-      lats.length !== values.length || lons.length !== values.length) {
-    throw new Error('Grille GRIB2 NOAA non régulière ou dimensions inattendues.');
+function matchesWindProduct(product, parameterNumber) {
+  if (!product || Number(product.parameterCategory) !== 2 || Number(product.parameterNumber) !== parameterNumber) {
+    return false;
   }
-
-  const lon0 = normalizeLon(Number(lons[0]));
-  const lonLast = unwrapLongitude(Number(lons[nx - 1]), lon0);
-  const lat0 = Number(lats[0]);
-  const latNextRow = Number(lats[nx]);
-  const dx = (lonLast - lon0) / (nx - 1);
-  const dy = latNextRow - lat0;
-  if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.abs(dx) < 1e-7 || Math.abs(dy) < 1e-7) {
-    throw new Error('Pas de grille GRIB2 invalide.');
-  }
-  return { nx, ny, lon0, lat0, dx, dy, values };
-}
-
-function matchesWindRecord(s4, parameterNumber) {
-  if (!s4 || Number(s4.parameterCategory) !== 2 || Number(s4.parameterNumber) !== parameterNumber) return false;
-  // Le filtre NOMADS demande déjà explicitement le niveau à 10 mètres.
-  // On vérifie aussi le type de surface quand le décodeur le fournit.
-  if (s4.typeOfFirstFixedSurface !== undefined && Number(s4.typeOfFirstFixedSurface) !== 103) return false;
-  if (s4.scaledValueOfFirstFixedSurface !== undefined && Number(s4.scaledValueOfFirstFixedSurface) !== 10) return false;
+  // 103 = height above ground; the NOMADS query explicitly requests 10 m.
+  if (product.typeOfFirstFixedSurface !== undefined && Number(product.typeOfFirstFixedSurface) !== 103) return false;
+  if (product.scaledValueOfFirstFixedSurface !== undefined && Number(product.scaledValueOfFirstFixedSurface) !== 10) return false;
   return true;
+}
+
+function decodeOneField(decoder, field) {
+  const grid = decoder.parseGrid(field.section3);
+  if (!Number.isInteger(grid.ni) || !Number.isInteger(grid.nj) || grid.ni < 2 || grid.nj < 2) {
+    throw new Error('Dimensions de grille GRIB2 invalides.');
+  }
+  if (grid.uvRelativeToGrid) {
+    throw new Error('Le champ de vent NOAA est relatif à la grille ; le GFS régulier attendu doit être relatif au nord vrai.');
+  }
+  const decoded = decoder.decodeFieldValues(field);
+  if (!decoded || !decoded.values || decoded.values.length !== grid.ni * grid.nj) {
+    throw new Error('Le décodeur GRIB2 a renvoyé un nombre de valeurs incohérent.');
+  }
+  return { grid, values: decoded.values, missingValue: decoded.missingValue };
 }
 
 async function decodeWindPair(buffer) {
   const decoder = await getDecoder();
   const bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-  const handle = decoder.parseGrib2(bytes);
-  const recordCount = Number(decoder.getRecordCount(handle));
+  const messages = decoder.splitMessages(bytes);
   let u = null;
   let v = null;
+  let fieldCount = 0;
 
-  for (let record = 1; record <= recordCount; record++) {
-    let s4;
-    try { s4 = decoder.getSection4(handle, record); } catch (_) { continue; }
-    if (!u && matchesWindRecord(s4, 2)) u = makeGridField(decoder, handle, record);
-    if (!v && matchesWindRecord(s4, 3)) v = makeGridField(decoder, handle, record);
+  for (const message of messages) {
+    const fields = decoder.parseFields(message);
+    fieldCount += fields.length;
+    for (const field of fields) {
+      const product = decoder.parseProduct(field.section4);
+      if (!matchesWindProduct(product, 2) && !matchesWindProduct(product, 3)) continue;
+
+      const parameterNumber = Number(product.parameterNumber);
+      if ((parameterNumber === 2 && u) || (parameterNumber === 3 && v)) continue;
+      const decoded = decodeOneField(decoder, field);
+      if (parameterNumber === 2) u = decoded;
+      if (parameterNumber === 3) v = decoded;
+      if (u && v) break;
+    }
     if (u && v) break;
   }
 
   if (!u || !v) {
-    throw new Error('Les deux champs UGRD/VGRD à 10 m sont absents du GRIB2 NOAA (records=' + recordCount + ').');
+    throw new Error('Les deux champs UGRD/VGRD à 10 m sont absents du GRIB2 NOAA (champs=' + fieldCount + ').');
   }
-  if (u.nx !== v.nx || u.ny !== v.ny || Math.abs(u.dx - v.dx) > 1e-5 || Math.abs(u.dy - v.dy) > 1e-5) {
-    throw new Error('Les grilles U et V du GRIB2 ne correspondent pas.');
+  if (u.grid.gridKey !== v.grid.gridKey || u.values.length !== v.values.length) {
+    throw new Error('Les grilles U et V du GRIB2 NOAA ne correspondent pas.');
   }
   return { u, v };
 }
 
+function gribStorageIndex(grid, column, row) {
+  // Ordre de stockage GRIB2 (ligne/colonne, balayage alterné éventuel).
+  if (grid.jPointsAreConsecutive) {
+    if (grid.alternativeRowScanning) {
+      return column * grid.nj + (column % 2 === 1 ? grid.nj - 1 - row : row);
+    }
+    return column * grid.nj + row;
+  }
+  if (grid.alternativeRowScanning) {
+    return row * grid.ni + (row % 2 === 1 ? grid.ni - 1 - column : column);
+  }
+  return row * grid.ni + column;
+}
+
 function sampleField(field, point) {
-  const xLon = unwrapLongitude(point.lng, field.lon0);
-  const fx = (xLon - field.lon0) / field.dx;
-  const fy = (point.lat - field.lat0) / field.dy;
-  if (!Number.isFinite(fx) || !Number.isFinite(fy) || fx < -1e-4 || fy < -1e-4 ||
-      fx > field.nx - 1 + 1e-4 || fy > field.ny - 1 + 1e-4) return null;
+  const decoder = decoderModule;
+  const grid = field.grid;
+  if (!decoder || !grid || grid.kind !== 'latlon') return null;
 
-  const x = Math.max(0, Math.min(field.nx - 1, fx));
-  const y = Math.max(0, Math.min(field.ny - 1, fy));
-  let ix = Math.floor(x);
-  let iy = Math.floor(y);
-  let tx = x - ix;
-  let ty = y - iy;
-  if (ix >= field.nx - 1) { ix = field.nx - 2; tx = 1; }
-  if (iy >= field.ny - 1) { iy = field.ny - 2; ty = 1; }
+  // Garde-fou géographique : le point doit être proche de la grille NOAA.
+  const nearest = decoder.nearestGridpoint(grid, point.lat, point.lng);
+  if (!nearest || !Number.isInteger(nearest.index) || nearest.index < 0 ||
+      nearest.index >= field.values.length || !Number.isFinite(nearest.distanceKm) || nearest.distanceKm > 35) {
+    return null;
+  }
 
-  const k = iy * field.nx + ix;
-  const a = field.values[k];
-  const b = field.values[k + 1];
-  const c = field.values[k + field.nx];
-  const d = field.values[k + field.nx + 1];
-  if (![a, b, c, d].every(Number.isFinite)) return null;
+  // Coordonnées fractionnaires dans la grille régulière GFS 0,25°.
+  const iSign = grid.iScansNegatively ? -1 : 1;
+  const jStep = grid.jScansPositively ? grid.jDirectionIncrement : -grid.jDirectionIncrement;
+  // Normalisation nécessaire près de Greenwich : le GRIB peut encoder 357°
+  // alors que le simulateur exprime la même longitude sous la forme -3°.
+  let lonDelta = (((point.lng - grid.longitudeOfFirstGridPoint) * iSign) % 360 + 360) % 360;
+  const iWraps = grid.ni * grid.iDirectionIncrement >= 360 - grid.iDirectionIncrement * 0.5;
+  const column = lonDelta / grid.iDirectionIncrement;
+  const row = (point.lat - grid.latitudeOfFirstGridPoint) / jStep;
+
+  if (!Number.isFinite(column) || !Number.isFinite(row) ||
+      (!iWraps && (column < -1e-4 || column > grid.ni - 1 + 1e-4)) ||
+      row < -1e-4 || row > grid.nj - 1 + 1e-4) return null;
+
+  const c = Math.max(0, Math.min(iWraps ? grid.ni - 1 : grid.ni - 1, column));
+  const r = Math.max(0, Math.min(grid.nj - 1, row));
+  let c0 = Math.floor(c);
+  let r0 = Math.floor(r);
+  let tx = c - c0;
+  let ty = r - r0;
+  let c1 = c0 + 1;
+  let r1 = r0 + 1;
+
+  if (c1 >= grid.ni) {
+    if (iWraps) c1 = 0;
+    else { c0 = grid.ni - 2; c1 = grid.ni - 1; tx = 1; }
+  }
+  if (r1 >= grid.nj) { r0 = grid.nj - 2; r1 = grid.nj - 1; ty = 1; }
+
+  const a = Number(field.values[gribStorageIndex(grid, c0, r0)]);
+  const b = Number(field.values[gribStorageIndex(grid, c1, r0)]);
+  const cValue = Number(field.values[gribStorageIndex(grid, c0, r1)]);
+  const d = Number(field.values[gribStorageIndex(grid, c1, r1)]);
+  const valid = value => Number.isFinite(value) && Math.abs(value) < 9000;
+  if (![a, b, cValue, d].every(valid)) return null;
+
   const top = a + (b - a) * tx;
-  const bottom = c + (d - c) * tx;
+  const bottom = cValue + (d - cValue) * tx;
   return top + (bottom - top) * ty;
 }
 
@@ -805,6 +845,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+
   if (requestUrl.pathname === '/api/gfs/start') {
     if (req.method !== 'POST') return send(res, 405, 'Method Not Allowed');
     try {
@@ -827,11 +868,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method !== 'GET') return send(res, 405, 'Method Not Allowed');
     return sendJson(res, 200, {
-      jobId: job.id, state: job.state,
-      done: wxStatus.done, total: wxStatus.total,
+      jobId: job.id,
+      state: job.state,
+      done: wxStatus.done,
+      total: wxStatus.total,
       message: job.state === 'running' ? wxStatus.message : job.message,
-      cycle: wxStatus.cycle, error: job.error,
-      createdAt: job.createdAt, completedAt: job.completedAt || null
+      cycle: wxStatus.cycle,
+      error: job.error,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt || null
     });
   }
 
@@ -903,10 +948,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Virtual Regatta NOAA GFS : http://${HOST}:${PORT}`);
+  console.log(`Virtual Regatta NOAA GFS PWA : http://${HOST}:${PORT}`);
   console.log(`Page d'accueil : ${DEFAULT_PAGE}`);
   console.log('Météo : NOAA GFS 0,25° · GRIB2 · U/V à 10 m');
-  console.log('Décodeur GRIB2 : ' + (decoderModule ? 'prêt' : 'sera initialisé à la première requête météo'));
+  console.log('Décodeur GRIB2 : ' + (decoderModule ? 'prêt' : 'sera chargé à la première requête météo'));
   console.log('Intervalle NOMADS : ' + (NOAA_MIN_INTERVAL_MS / 1000) + ' s entre deux téléchargements.');
   console.log('Cache météo local : ' + WEATHER_DIR);
 });
