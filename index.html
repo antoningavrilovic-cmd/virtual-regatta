@@ -926,7 +926,7 @@
     return {vec,A,nr,e2:[nr[1]*A[2]-nr[2]*A[1],nr[2]*A[0]-nr[0]*A[2],nr[0]*A[1]-nr[1]*A[0]],total:distanceNm(S,F)};
   }
 
-  // Prévisions GFS (comme Virtual Regatta) 16 jours horaires + courants Open-Meteo Marine (7 jours, figés ensuite), grille en COULOIR autour de la route.
+  // Prévisions GFS (comme les simulateurs de régate) 16 jours horaires + courants Open-Meteo Marine (7 jours, figés ensuite), grille en COULOIR autour de la route.
   const idbOpen=()=>new Promise((res,rej)=>{const q=indexedDB.open('vr',1);q.onupgradeneeded=()=>q.result.createObjectStore('fc');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});
   async function idbGet(k){try{const db=await idbOpen();return await new Promise(r=>{const q=db.transaction('fc').objectStore('fc').get(k);q.onsuccess=()=>r(q.result||null);q.onerror=()=>r(null);});}catch(e){return null;}}
   async function idbSet(k,v){try{const db=await idbOpen();db.transaction('fc','readwrite').objectStore('fc').put(v,k);}catch(e){}}
