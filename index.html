@@ -337,6 +337,9 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  // ⚠ ADRESSE DE TON SERVEUR RENDER (sans / à la fin). Vérifie-la dans ton tableau de bord Render.
+  const RENDER_URL = 'https://virtual-regatta-noaa.onrender.com';
+  const API_BASE = (/onrender\.com$|^localhost$|^127\./.test(location.hostname)) ? '' : (window.VR_API_BASE || RENDER_URL);
   const state = {
     view:'home', team:'Initiatives-Cœur', skipper:'Violette Dorange', teamColor:'#ef7867',
     race:'rhum', paused:false, heading:225, speed:0, windSpeed:0, windDir:240,
@@ -615,7 +618,7 @@
     try{
       const c=state.position;
       const target=typeof weatherTimeMs==='function'?weatherTimeMs():Date.now();
-      const url='/api/gfs/local?'+new URLSearchParams({lat:c.lat.toFixed(4),lng:c.lng.toFixed(4),time:String(Math.round(target))});
+      const url=API_BASE+'/api/gfs/local?'+new URLSearchParams({lat:c.lat.toFixed(4),lng:c.lng.toFixed(4),time:String(Math.round(target))});
       const response=await fetch(url,{cache:'no-store'});
       let data;
       try{data=await response.json();}catch(_){throw new Error('Réponse météo NOAA illisible.');}
@@ -778,18 +781,33 @@
     try{
     // Le serveur télécharge et décode les GRIB2. On interroge son statut afin
     // d'afficher l'avancement pendant la récupération des 129 échéances GFS.
-    let monitoring=true,pollBusy=false;
-    const pollStatus=async()=>{
-      if(!monitoring||pollBusy)return;
-      pollBusy=true;
-      try{const r=await fetch('/api/gfs/status',{cache:'no-store'});if(r.ok){const st=await r.json();if(st.message)progress(st.message+(st.total?' · '+st.done+'/'+st.total:''));}}
-      catch(_){}finally{pollBusy=false;}
-    };
-    const monitor=setInterval(pollStatus,2500);pollStatus();
-    let response;
-    try{
-      response=await fetch('/api/gfs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({points})});
-    }finally{monitoring=false;clearInterval(monitor);}
+    const jobWait=ms=>new Promise(r=>setTimeout(r,ms));
+    let response,jobId=null;
+    for(let attempt=0;attempt<60&&!jobId;attempt++){   // 409 = un autre calcul tourne déjà : on réessaie
+      let s,d={};
+      try{s=await fetch(API_BASE+'/api/gfs/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({points})});}
+      catch(e){progress('Serveur NOAA injoignable (Render se réveille ?) · nouvelle tentative…');await jobWait(5000);continue;}
+      try{d=await s.json();}catch(_){}
+      if(s.ok&&d.jobId){jobId=d.jobId;break;}
+      if(s.status===409){progress(d.error||'Serveur occupé par un autre calcul NOAA…');await jobWait(5000);continue;}
+      throw new Error(d.error||('Erreur serveur NOAA HTTP '+s.status));
+    }
+    if(!jobId)throw new Error('Serveur NOAA injoignable ou occupé. Vérifie l’adresse API_BASE en haut du script.');
+    const jobEnd=Date.now()+45*60000;
+    for(;;){   // le serveur calcule en tâche de fond ; on interroge son avancement
+      if(Date.now()>jobEnd)throw new Error('Calcul NOAA trop long (45 min).');
+      await jobWait(2500);
+      let st;
+      try{
+        const r=await fetch(API_BASE+'/api/gfs/jobs/'+jobId,{cache:'no-store'});
+        if(r.status===404)throw new Error('Calcul NOAA expiré (serveur redémarré). Relance la course.');
+        st=await r.json();
+      }catch(e){if(/expiré/.test(e.message))throw e;continue;}
+      if(st.message)progress(st.message+(st.state==='running'&&st.total?' · '+st.done+'/'+st.total:''));
+      if(st.state==='failed')throw new Error(st.error||'Calcul NOAA échoué.');
+      if(st.state==='ready')break;
+    }
+    response=await fetch(API_BASE+'/api/gfs/jobs/'+jobId+'/result');
     if(!response.ok){let message='Erreur serveur NOAA HTTP '+response.status;try{const d=await response.json();message=d.error||message;}catch(_){}throw new Error(message);}
     const t0=Number(response.headers.get('X-VR-GFS-T0'));
     const serverHours=Number(response.headers.get('X-VR-GFS-Hours'))||NT;
@@ -1004,6 +1022,24 @@
   const BOT_COLORS=['#ff9f43','#8e7dff','#ff6b81','#70d6a7','#f6d365','#64c7ff','#d48cff','#ff805f','#9fd356','#e4a4c4','#56d9c8','#c7a6ff','#ffa8a8','#8cb8ff','#f0c36b','#89d5b5','#ed8fca','#a6dcef','#c2d46b','#f7a66b'];
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   function clearBotMarkers(){if(state.map)state.bots.forEach(b=>{if(b.marker)state.map.removeLayer(b.marker);});}
+  // Waypoints de contournement [lat,lng] : les IA les suivent dans l'ordre (rayon 7 nm) avant de viser l'arrivée.
+  const RACE_WAYPOINTS={
+    rhum:[[48.98,-2.60],[49.05,-3.35],[48.95,-4.25],[48.80,-5.45],[48.40,-5.95]],   // Fréhel → Héaux de Bréhat → Roscoff → NW Ouessant → large
+    atlantic:[[47.20,-5.00]],                                                         // Groix/Penmarc'h → large
+    lorient:[[47.52,-3.62]]                                                           // ouest de Groix → Quiberon
+  };
+  const firstTarget=()=>{const l=RACE_WAYPOINTS[state.race];return l&&l.length?{lat:l[0][0],lng:l[0][1]}:state.finish;};
+  function botTarget(bot){
+    const l=RACE_WAYPOINTS[state.race]||[];
+    while(bot.wp<l.length){const p={lat:l[bot.wp][0],lng:l[bot.wp][1]};if(distanceNm(bot.position,p)>7)return p;bot.wp++;}
+    return state.finish;
+  }
+  function botAheadClear(bot,nm){for(let d=1.2;d<=nm+1e-6;d+=1.2){if(botPointBlocked(destination(bot.position,bot.heading,d)))return false;}return true;}
+  function botEscapeHeading(bot){   // aucun cap « idéal » libre : on prend celui qui offre le plus d'eau devant
+    let best=null,bestD=0.6;
+    for(let h=0;h<360;h+=10){let d=0;while(d<6&&!botPointBlocked(destination(bot.position,h,d+0.3)))d+=0.3;if(d>bestD){bestD=d;best=h;}}
+    return best;
+  }
   function initBots(){
     clearBotMarkers();state.bots=[];
     if(!state.landReady||!window.L)return;
@@ -1015,7 +1051,7 @@
       const lateral=(count===1?0:(i/(count-1)-.5)*3.2);
       let pos=destination(state.start,lateral>=0?axis:(axis+180)%360,Math.abs(lateral));
       if(isLand(pos)||inZone(pos))pos={...state.start};
-      state.bots.push({id:i,name:BOT_NAMES[i],level,skill,performance:.80+skill*.20,position:pos,heading:bearing(pos,state.finish),speed:0,sail:'jib',finished:false,finishTime:null,nextDecisionAt:Math.random()*900,decisionInterval:3600+(1-skill)*1800,marker:null,color:BOT_COLORS[i],lastWind:state.windReady?{speed:state.windSpeed,dir:state.windDir,cu:0,cv:0}:null});
+      state.bots.push({id:i,name:BOT_NAMES[i],level,skill,performance:.80+skill*.20,position:pos,heading:bearing(pos,firstTarget()),speed:0,sail:'jib',finished:false,finishTime:null,wp:0,nextCoastCheck:0,nextDecisionAt:Math.random()*900,decisionInterval:3600+(1-skill)*1800,marker:null,color:BOT_COLORS[i],lastWind:state.windReady?{speed:state.windSpeed,dir:state.windDir,cu:0,cv:0}:null});
     }
     renderBotMarkers();updateStandings();
   }
@@ -1044,7 +1080,7 @@
     return true;
   }
   function botHeadingChoice(bot,w){
-    const target=bearing(bot.position,state.finish),candidates=[];
+    const target=bearing(bot.position,botTarget(bot)),candidates=[];
     // 36 caps suffisent pour le choix initial. Les vérifications côtières,
     // plus coûteuses, ne sont faites que pour les meilleurs candidats.
     for(let h=0;h<360;h+=10){
@@ -1089,9 +1125,13 @@
       if(!w&&bot.lastWind&&state.windReady)w=bot.lastWind;
       if(!w)continue; // aucune météo inventée
       bot.lastWind={speed:w.speed,dir:w.dir,cu:w.cu||0,cv:w.cv||0};
+      if(!bot.grounded&&state.simTime>=bot.nextCoastCheck){   // regard devant toutes les 10 min de jeu : côte proche = nouvelle décision
+        bot.nextCoastCheck=state.simTime+600;
+        if(bot.speed>1&&!botAheadClear(bot,Math.max(3,bot.speed*.4)))bot.nextDecisionAt=state.simTime;
+      }
       if(state.simTime>=bot.nextDecisionAt){
         const previousHeading=bot.heading,previous=signedTwa(bot.heading,w.dir);
-        const choice=botHeadingChoice(bot,w);
+        let choice=botHeadingChoice(bot,w);if(!Number.isFinite(choice))choice=botEscapeHeading(bot);
         if(Number.isFinite(choice)){
           bot.heading=choice;bot.grounded=false;
           const next=signedTwa(bot.heading,w.dir);
@@ -1124,7 +1164,7 @@
           next=p;
         }
         if(blocked){
-          bot.speed=0;bot.grounded=true;
+          bot.speed*=.5;
           // Réévalue le cap dès la prochaine image, au lieu de réessayer le même cap.
           bot.nextDecisionAt=state.simTime;
         }else bot.position=next;
@@ -1497,22 +1537,22 @@
   $('setTimeScale').onchange=()=>{SET.timeScale=$('setTimeScale').value;state.timeScale=Number(SET.timeScale)||600;$('timeScale').textContent='×'+state.timeScale;saveSet();};
   $('setWeatherRate').onchange=()=>{SET.weatherRate=$('setWeatherRate').value;setWeatherRate(SET.weatherRate);saveSet();toast('Le rythme météo est appliqué sans saut dans les prévisions.');};
   $('setColor').oninput=()=>{SET.color=$('setColor').value;state.teamColor=SET.color;updateBoatIcon();saveSet();};
-  $('setWxRefresh').onclick=async()=>{RT.cache={};RT.coarse=null;RT.fine=null;await idbClear();try{await fetch('/api/gfs/cache',{method:'DELETE'});}catch(e){}if(state.mapReady){await ensureCoarse(true);}else toast('La météo NOAA sera rechargée au prochain départ.');updateSetInfo();};
+  $('setWxRefresh').onclick=async()=>{RT.cache={};RT.coarse=null;RT.fine=null;await idbClear();try{await fetch(API_BASE+'/api/gfs/cache',{method:'DELETE'});}catch(e){}if(state.mapReady){await ensureCoarse(true);}else toast('La météo NOAA sera rechargée au prochain départ.');updateSetInfo();};
   $('setWxTest').onclick=async()=>{const b=$('setWxTest'),t=performance.now();b.disabled=true;
-    try{const r=await fetch('/api/gfs/local?lat=48.7&lng=-2.2&time='+Date.now(),{cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.error||'Serveur NOAA indisponible');const w=d.winds&&d.winds[4];if(!w)throw new Error('Donnée de vent absente');toast('NOAA GFS OK · '+w.speed.toFixed(1)+' nds · '+Math.round(w.direction)+'° · '+Math.round(performance.now()-t)+' ms');}
+    try{const r=await fetch(API_BASE+'/api/gfs/local?lat=48.7&lng=-2.2&time='+Date.now(),{cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.error||'Serveur NOAA indisponible');const w=d.winds&&d.winds[4];if(!w)throw new Error('Donnée de vent absente');toast('NOAA GFS OK · '+w.speed.toFixed(1)+' nds · '+Math.round(w.direction)+'° · '+Math.round(performance.now()-t)+' ms');}
     catch(e){toast(e.message);}b.disabled=false;updateSetInfo();};
-  $('setWxClear').onclick=async()=>{RT.cache={};RT.coarse=null;RT.fine=null;await idbClear();try{await fetch('/api/gfs/cache',{method:'DELETE'});}catch(e){}toast('Cache météo NOAA vidé');updateSetInfo();};
+  $('setWxClear').onclick=async()=>{RT.cache={};RT.coarse=null;RT.fine=null;await idbClear();try{await fetch(API_BASE+'/api/gfs/cache',{method:'DELETE'});}catch(e){}toast('Cache météo NOAA vidé');updateSetInfo();};
   // sauvegarde : fichier serveur (node server.js → save.json) sinon navigateur
   const SAVE={server:null,all:{races:{}},at:0,KEY:'vr_save_v1'};
   async function saveLoad(){
-    try{const r=await fetch('/api/save',{cache:'no-store'});if(r.ok){SAVE.all=await r.json();SAVE.server=true;if(!SAVE.all.races)SAVE.all.races={};return;}}catch(e){}
+    try{const r=await fetch(API_BASE+'/api/save',{cache:'no-store'});if(r.ok){SAVE.all=await r.json();SAVE.server=true;if(!SAVE.all.races)SAVE.all.races={};return;}}catch(e){}
     SAVE.server=false;try{SAVE.all=JSON.parse(localStorage.getItem(SAVE.KEY)||'{}');}catch(e){SAVE.all={};}if(!SAVE.all.races)SAVE.all.races={};
   }
   function snapshot(){const tr=state.track,k=Math.max(1,Math.ceil(tr.length/400));return {race:state.race,position:{...state.position},heading:state.heading,twaLock:state.twaLock,sail:state.sail,sailMode:state.sailMode,speed:state.speed,track:tr.filter((_,i)=>i%k===0||i===tr.length-1),raceTime:state.simTime,playerFinished:state.playerFinished,finishTime:state.finishTime,bots:state.bots.map(b=>({id:b.id,position:b.position,heading:b.heading,speed:b.speed,sail:b.sail,finished:b.finished,finishTime:b.finishTime,nextDecisionAt:b.nextDecisionAt})),savedAt:Date.now()};}
   async function saveNow(force){
     if(!state.mapReady||(state.view!=='race'&&!force))return;SAVE.all.races[state.race]=snapshot();SAVE.at=Date.now();
     try{localStorage.setItem(SAVE.KEY,JSON.stringify(SAVE.all));}catch(e){}
-    if(SAVE.server!==false){try{const r=await fetch('/api/save',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(SAVE.all),keepalive:true});SAVE.server=r.ok;}catch(e){SAVE.server=false;}}
+    if(SAVE.server!==false){try{const r=await fetch(API_BASE+'/api/save',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(SAVE.all),keepalive:true});SAVE.server=r.ok;}catch(e){SAVE.server=false;}}
   }
   async function restoreProgress(id){
     await saveLoad();const s=SAVE.all.races[id];if(!s)return false;
@@ -1535,7 +1575,7 @@
     $('setSaveInfo').textContent=(SAVE.server===true?'Sauvegarde dans le fichier du serveur (save.json).':SAVE.server===false?'Sauvegarde dans le navigateur. Lance « node server.js » pour utiliser un fichier serveur.':'Aucune sauvegarde pour l’instant.')+(SAVE.at?' Dernière : '+fmtT(SAVE.at)+' UTC.':'');
   }
   $('setSaveNow').onclick=async()=>{await saveNow(true);updateSetInfo();toast('Progression sauvegardée');};
-  $('setSaveClear').onclick=async()=>{SAVE.all={races:{}};try{localStorage.removeItem(SAVE.KEY);}catch(e){}if(SAVE.server!==false){try{await fetch('/api/save',{method:'PUT',headers:{'Content-Type':'application/json'},body:'{"races":{}}'});}catch(e){}}updateSetInfo();toast('Sauvegardes effacées');};
+  $('setSaveClear').onclick=async()=>{SAVE.all={races:{}};try{localStorage.removeItem(SAVE.KEY);}catch(e){}if(SAVE.server!==false){try{await fetch(API_BASE+'/api/save',{method:'PUT',headers:{'Content-Type':'application/json'},body:'{"races":{}}'});}catch(e){}}updateSetInfo();toast('Sauvegardes effacées');};
   setInterval(()=>{if(SET.auto&&state.view==='race'&&!state.paused)saveNow();},15000);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)saveNow();});window.addEventListener('pagehide',()=>saveNow());
   setInterval(()=>{if(state.view==='race'&&RT.coarse&&RT.coarse.epoch!==Math.floor(Date.now()/216e5))ensureCoarse(true);},60000);   // nouveau cycle NOAA toutes les 6 h

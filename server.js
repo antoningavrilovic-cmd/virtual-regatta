@@ -30,7 +30,10 @@ const DEG = Math.PI / 180;
 const HOUR_MS = 3600000;
 // NOMADS demande d'espacer les téléchargements automatisés d'environ 10 s.
 // Peut être ajusté par variable d'environnement si NOAA publie une nouvelle consigne.
-const NOAA_MIN_INTERVAL_MS = Math.max(1000, Number(process.env.NOAA_MIN_INTERVAL_MS || 10000));
+const NOAA_MIN_INTERVAL_MS = Math.max(1000, Number(process.env.NOAA_MIN_INTERVAL_MS || 2000));
+// NOMADS tolère 120 requêtes/min par IP : 2 s d'écart = 30/min, très prudent.
+// Origine autorisée à appeler l'API (ex. https://tonpseudo.github.io). '*' = tout le monde.
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 
 fs.mkdirSync(GRIB_DIR, { recursive: true });
 fs.mkdirSync(FORECAST_DIR, { recursive: true });
@@ -798,6 +801,15 @@ const server = http.createServer(async (req, res) => {
   } catch (_) {
     return send(res, 400, 'Bad Request');
   }
+
+  // CORS : le site (GitHub Pages) et l'API (Render) sont sur deux domaines différents.
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Expose-Headers', 'X-VR-GFS-T0, X-VR-GFS-Cycle, X-VR-GFS-Points, X-VR-GFS-Hours, X-VR-GFS-Model, X-VR-Weather-Source');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
   if (requestUrl.pathname === '/api/save') {
     if (req.method === 'GET') return sendJson(res, 200, readSave());
